@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestingAi.Api", "TestingAi.Api\TestingAi.Api.csproj", "{5122AF54-1155-46FC-8167-4F76C0F718FE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestingAi.Agents", "TestingAi.Agents\TestingAi.Agents.csproj", "{E67209C8-E069-46A2-9C2E-9423B165CA8D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestingAi.Tester", "TestingAi.Tester\TestingAi.Tester.csproj", "{9C295075-9DC9-421C-B09F-EE08F3709202}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5122AF54-1155-46FC-8167-4F76C0F718FE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5122AF54-1155-46FC-8167-4F76C0F718FE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5122AF54-1155-46FC-8167-4F76C0F718FE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5122AF54-1155-46FC-8167-4F76C0F718FE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E67209C8-E069-46A2-9C2E-9423B165CA8D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E67209C8-E069-46A2-9C2E-9423B165CA8D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E67209C8-E069-46A2-9C2E-9423B165CA8D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E67209C8-E069-46A2-9C2E-9423B165CA8D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9C295075-9DC9-421C-B09F-EE08F3709202}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9C295075-9DC9-421C-B09F-EE08F3709202}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9C295075-9DC9-421C-B09F-EE08F3709202}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9C295075-9DC9-421C-B09F-EE08F3709202}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
