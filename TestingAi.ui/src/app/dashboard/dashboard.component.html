@@ -1,1 +1,168 @@
-<p>dashboard works!</p>
+<div class="layout">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="logo"><span class="logo-icon">⚡</span><span class="logo-text">TestingAi</span></div>
+
+    <div class="settings-panel">
+      <div class="settings-title">Paramètres</div>
+      <div class="setting-row">
+        <span class="setting-label">Intervention humaine</span>
+        <button class="toggle" [class.active]="settings.humanInterventionEnabled" (click)="toggleHumanIntervention()">
+          <span class="toggle-knob"></span>
+        </button>
+      </div>
+      <div class="setting-hint" [class.auto]="!settings.humanInterventionEnabled">
+        {{ settings.humanInterventionEnabled ? 'Mode manuel — vous décidez.' : 'Mode automatique — l\'IA décide.' }}
+      </div>
+      <div class="setting-row mt-8">
+        <span class="setting-label">Tentatives max</span>
+        <input type="number" class="small-input" [(ngModel)]="settings.maxRetries" (change)="saveSettings()" min="1" max="10">
+      </div>
+    </div>
+
+    <div class="sessions-label">Sessions</div>
+    <button class="btn-new-session" (click)="showNewSession = !showNewSession">+ Nouvelle session</button>
+
+    <div class="new-session-form" *ngIf="showNewSession">
+      <input class="path-input" [(ngModel)]="newTestPath" placeholder="Chemin projet de tests (ex: C:\...\App.Tests)">
+      <input class="path-input" [(ngModel)]="newSourcePath" placeholder="Chemin sources (optionnel)">
+      <div class="form-actions">
+        <button class="btn-run" (click)="startNewSession()" [disabled]="isStarting || !newTestPath.trim()">
+          {{ isStarting ? '▶ Démarrage…' : '▶ Lancer' }}
+        </button>
+        <button class="btn-cancel" (click)="showNewSession = false">Annuler</button>
+      </div>
+      <div class="start-error" *ngIf="startError">{{ startError }}</div>
+    </div>
+
+    <div class="session-list">
+      <button *ngFor="let s of sessions" class="session-item" [class.active]="s.id === selectedSessionId" (click)="selectSession(s.id)">
+        <div class="session-item-name">Session #{{ s.id }}</div>
+        <span class="session-status" [ngClass]="'ss-' + s.status">{{ sessionStatusLabel(s.status) }}</span>
+        <div class="session-stats" *ngIf="s.summary">
+          <span class="stat-pill green">{{ s.summary.green }}✓</span>
+          <span class="stat-pill red">{{ s.summary.red }}✗</span>
+          <span class="stat-pill await" *ngIf="s.summary.awaitingDecision > 0">{{ s.summary.awaitingDecision }}👤</span>
+        </div>
+      </button>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="content">
+    <!-- Empty state -->
+    <div class="empty-state" *ngIf="!selectedSessionId">
+      <div class="empty-icon">🧪</div>
+      <h2>Sélectionnez ou créez une session</h2>
+      <p>Lancez un pipeline pour analyser et corriger vos tests .NET automatiquement.</p>
+      <button class="btn-run large" (click)="showNewSession = true">+ Nouvelle session</button>
+    </div>
+
+    <ng-container *ngIf="selectedSessionId && selectedSession">
+      <!-- Session header -->
+      <div class="session-header">
+        <div class="session-title">
+          <h1>Session #{{ selectedSession.id }}</h1>
+          <span class="session-badge" [ngClass]="'ss-' + selectedSession.status">{{ sessionStatusLabel(selectedSession.status) }}</span>
+          <span class="running-dot" *ngIf="isSessionRunning"></span>
+        </div>
+        <div class="session-path">{{ selectedSession.targetProject }}</div>
+        <div class="resume-bar" *ngIf="isSessionAwaitingDecision">
+          <span class="resume-msg">👤 Des tests attendent votre décision. Définissez les actions ci-dessous, puis cliquez sur Reprendre.</span>
+          <button class="btn-resume" (click)="resumeSession()" [disabled]="isResuming">
+            {{ isResuming ? 'Reprise…' : '▶ Reprendre le pipeline' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Stats cards -->
+      <div class="stats-grid">
+        <div class="stat-card total" (click)="setFilter('all')" [class.active-filter]="filterStatus === 'all'">
+          <div class="stat-number">{{ testCases.length }}</div><div class="stat-label">Total</div>
+        </div>
+        <div class="stat-card green-card" (click)="setFilter('Green')" [class.active-filter]="filterStatus === 'Green'">
+          <div class="stat-number">{{ countByStatus('Green') }}</div><div class="stat-label">✓ Réussis</div>
+        </div>
+        <div class="stat-card red-card" (click)="setFilter('Red')" [class.active-filter]="filterStatus === 'Red'">
+          <div class="stat-number">{{ countByStatus('Red') }}</div><div class="stat-label">✗ Échoués</div>
+        </div>
+        <div class="stat-card await-card" (click)="setFilter('EnAttenteDecision')" [class.active-filter]="filterStatus === 'EnAttenteDecision'">
+          <div class="stat-number">{{ countByStatus('EnAttenteDecision') }}</div><div class="stat-label">👤 Décision</div>
+        </div>
+        <div class="stat-card pending-card" (click)="setFilter('Pending')" [class.active-filter]="filterStatus === 'Pending'">
+          <div class="stat-number">{{ countByStatus('Pending') }}</div><div class="stat-label">⏳ En attente</div>
+        </div>
+        <div class="stat-card ignored-card" (click)="setFilter('Ignored')" [class.active-filter]="filterStatus === 'Ignored'">
+          <div class="stat-number">{{ countByStatus('Ignored') }}</div><div class="stat-label">— Ignorés</div>
+        </div>
+      </div>
+
+      <!-- Bulk actions bar -->
+      <div class="bulk-bar" *ngIf="selectedTestIds.size > 0">
+        <span class="bulk-count">{{ selectedTestIds.size }} test(s) sélectionné(s)</span>
+        <button class="btn-action fix-test" (click)="bulkAction('FixTest')">🔧 Corriger le test</button>
+        <button class="btn-action fix-code" (click)="bulkAction('FixCode')">⚙️ Corriger le code</button>
+        <button class="btn-action ignore" (click)="bulkAction('Ignore')">✕ Ignorer</button>
+        <button class="btn-cancel" (click)="selectedTestIds.clear()">Annuler</button>
+      </div>
+
+      <!-- Tests table -->
+      <div class="table-wrapper" *ngIf="filteredTests.length > 0">
+        <table class="test-table">
+          <thead>
+            <tr>
+              <th class="col-check"><input type="checkbox" [checked]="allSelected" (change)="toggleSelectAll()"></th>
+              <th class="col-name">Test</th>
+              <th class="col-status">Statut</th>
+              <th class="col-action-set">Action</th>
+              <th class="col-retry">Tentatives</th>
+              <th class="col-actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let t of filteredTests; trackBy: trackById"
+                [class.selected-row]="selectedTestIds.has(t.id)"
+                [class.has-error]="t.status === 'Red'">
+              <td class="col-check"><input type="checkbox" [checked]="selectedTestIds.has(t.id)" (change)="toggleSelect(t.id)"></td>
+              <td class="col-name">
+                <div class="test-class">{{ t.className }}</div>
+                <div class="test-method">{{ t.methodName }}</div>
+                <div class="error-block" *ngIf="t.errorMessage">
+                  <button class="error-toggle" (click)="toggleError(t.id)">{{ isErrorExpanded(t.id) ? '▲ Masquer' : '▼ Voir l\'erreur' }}</button>
+                  <pre class="error-text" *ngIf="isErrorExpanded(t.id)">{{ t.errorMessage }}</pre>
+                  <div class="error-preview" *ngIf="!isErrorExpanded(t.id)">{{ truncate(t.errorMessage) }}</div>
+                </div>
+                <div class="fix-tag" *ngIf="t.fixApplied">✔ {{ t.fixApplied }}</div>
+              </td>
+              <td class="col-status"><span class="badge" [ngClass]="statusClass(t.status)">{{ statusLabel(t.status) }}</span></td>
+              <td class="col-action-set">
+                <span class="action-badge action-fix-test" *ngIf="t.action === 'FixTest'">🔧 Test</span>
+                <span class="action-badge action-fix-code" *ngIf="t.action === 'FixCode'">⚙️ Code</span>
+                <span class="action-badge action-ignore" *ngIf="t.action === 'Ignore'">✕ Ignoré</span>
+                <span class="no-action" *ngIf="t.action === 'None'">—</span>
+              </td>
+              <td class="col-retry">
+                <span class="retry-badge" *ngIf="t.retryCount > 0">{{ t.retryCount }}</span>
+                <span *ngIf="t.retryCount === 0">—</span>
+              </td>
+              <td class="col-actions">
+                <div class="action-btns" *ngIf="t.status !== 'Green' && t.status !== 'Ignored'">
+                  <button class="btn-action fix-test sm" (click)="setAction(t.id, 'FixTest')">🔧 Test</button>
+                  <button class="btn-action fix-code sm" (click)="setAction(t.id, 'FixCode')">⚙️ Code</button>
+                  <button class="btn-action ignore sm" (click)="setAction(t.id, 'Ignore')">✕</button>
+                </div>
+                <span class="green-ok" *ngIf="t.status === 'Green'">✓</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="no-tests" *ngIf="filteredTests.length === 0 && testCases.length > 0">
+        Aucun test avec le filtre « {{ filterStatus }} ».
+        <button class="link-btn" (click)="setFilter('all')">Voir tout</button>
+      </div>
+      <div class="no-tests" *ngIf="testCases.length === 0">Aucun test découvert pour cette session.</div>
+    </ng-container>
+  </main>
+</div>

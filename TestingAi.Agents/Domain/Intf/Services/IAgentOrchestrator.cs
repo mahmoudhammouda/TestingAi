@@ -5,6 +5,7 @@ namespace TestingAi.Agents.Domain.Intf.Services
 {
     public interface IAgentOrchestrator
     {
-        Task<AgentState> RunPipelineAsync(string targetProject, string sourceFile);
+        Task<AgentState> RunPipelineAsync(string testProjectPath, string sourceProjectPath);
+        Task<AgentState> ResumePipelineAsync(int sessionId);
     }
 }

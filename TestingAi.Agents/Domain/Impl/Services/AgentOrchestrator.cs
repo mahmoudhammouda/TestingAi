@@ -1,83 +1,187 @@
 using System;
-using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 using TestingAi.Agents.Domain.Impl.Models;
 using TestingAi.Agents.Domain.Intf.Services;
-using Newtonsoft.Json;
 
 namespace TestingAi.Agents.Domain.Impl.Services
 {
     public class AgentOrchestrator : IAgentOrchestrator
     {
-        private readonly IDbContext _dbContext;
-        private readonly IEnumerable<IAgent> _agents;
+        private readonly IDbContext _db;
+        private readonly TestDiscoveryAgent _discovery;
+        private readonly TestRunnerAgent _runner;
+        private readonly TestDecisionAgent _decision;
+        private readonly TestFixerAgent _fixer;
         private readonly ILogger<AgentOrchestrator> _logger;
 
-        public AgentOrchestrator(IDbContext dbContext, IEnumerable<IAgent> agents, ILogger<AgentOrchestrator> logger)
+        public AgentOrchestrator(
+            IDbContext db,
+            TestDiscoveryAgent discovery,
+            TestRunnerAgent runner,
+            TestDecisionAgent decision,
+            TestFixerAgent fixer,
+            ILogger<AgentOrchestrator> logger)
         {
-            _dbContext = dbContext;
-            _agents = agents;
+            _db = db;
+            _discovery = discovery;
+            _runner = runner;
+            _decision = decision;
+            _fixer = fixer;
             _logger = logger;
         }
 
-        public async Task<AgentState> RunPipelineAsync(string targetProject, string sourceFile)
+        public async Task<AgentState> RunPipelineAsync(string testProjectPath, string sourceProjectPath)
         {
-            _logger.LogInformation($"[Pipeline] Démarrage du pipeline pour le fichier {sourceFile}.");
-            int sessionId = await _dbContext.CreateSessionAsync(targetProject);
-            var state = new AgentState 
-            { 
-                SessionId = sessionId, 
-                TargetProjectPath = targetProject, 
-                CurrentFilePath = sourceFile 
+            _logger.LogInformation("[Orchestrateur] DÃ©marrage du pipeline pour : {Path}", testProjectPath);
+
+            var settings = await _db.GetSettingsAsync();
+            int sessionId = await _db.CreateSessionAsync(testProjectPath, sourceProjectPath);
+
+            var state = new AgentState
+            {
+                SessionId = sessionId,
+                TestProjectPath = testProjectPath,
+                SourceProjectPath = sourceProjectPath,
+                TargetProjectPath = testProjectPath,
+                Settings = settings,
+                PipelineStatus = "En_Cours"
             };
 
-            await ExecuteAgentAsync("Analyzer", state);
-            await ExecuteAgentAsync("Decider", state);
-            
-            while (state.RetryCount < 3 && !state.IsFinished)
-            {
-                await ExecuteAgentAsync("Creator", state);
-                await ExecuteAgentAsync("Verifier", state);
+            // Ã‰tape 1 : DÃ©couverte
+            await RunAgentAsync(_discovery, state);
 
-                if (state.ValidationErrors.Count > 0)
-                {
-                    _logger.LogWarning($"[Pipeline] Échec de validation (Tentative {state.RetryCount + 1}/3).");
-                    state.RetryCount++;
-                }
-                else
-                {
-                    _logger.LogInformation("[Pipeline] Validation réussie.");
-                    state.IsFinished = true;
-                }
+            if (state.TestCases.Count == 0)
+            {
+                _logger.LogWarning("[Orchestrateur] Aucun test dÃ©couvert.");
+                state.PipelineStatus = "TerminÃ©";
+                state.IsFinished = true;
+                await SaveSessionState(state);
+                return state;
             }
 
-            if (state.IsFinished)
+            // Ã‰tape 2 : ExÃ©cution
+            await RunAgentAsync(_runner, state);
+
+            int redCount = state.TestCases.Count(t => t.Status == TestStatus.Red);
+            if (redCount == 0)
             {
-                await ExecuteAgentAsync("Exporter", state);
-                _logger.LogInformation("[Pipeline] Pipeline terminé avec succès.");
-            }
-            else
-            {
-                _logger.LogError("[Pipeline] Échec du pipeline après toutes les tentatives.");
+                _logger.LogInformation("[Orchestrateur] Tous les tests sont verts !");
+                state.PipelineStatus = "TerminÃ©";
+                state.IsFinished = true;
+                await SaveSessionState(state);
+                return state;
             }
 
-            await _dbContext.UpdateSessionStateAsync(sessionId, JsonConvert.SerializeObject(state), state.IsFinished ? "Terminé" : "Erreur");
+            // Ã‰tape 3 : DÃ©cision
+            await RunAgentAsync(_decision, state);
+
+            // Mode humain : suspendre ici
+            if (state.Settings.HumanInterventionEnabled && state.PipelineStatus == "EnAttenteDecision")
+            {
+                _logger.LogInformation("[Orchestrateur] Pipeline suspendu â€” en attente des dÃ©cisions humaines.");
+                await SaveSessionState(state, "EnAttenteDecision");
+                return state;
+            }
+
+            // Mode auto : continuer
+            await RunFixAndVerifyLoopAsync(state);
             return state;
         }
 
-        private async Task ExecuteAgentAsync(string agentName, AgentState state)
+        public async Task<AgentState> ResumePipelineAsync(int sessionId)
         {
-            foreach (var agent in _agents)
+            _logger.LogInformation("[Orchestrateur] Reprise du pipeline pour la session {Id}", sessionId);
+
+            var session = await _db.GetSessionAsync(sessionId);
+            if (session == null) throw new Exception($"Session {sessionId} introuvable.");
+
+            var testCases = (await _db.GetTestCasesAsync(sessionId)).ToList();
+            var settings = await _db.GetSettingsAsync();
+
+            var state = new AgentState
             {
-                if (agent.Name == agentName)
-                {
-                    _logger.LogInformation($"[Pipeline] Exécution de l'agent : {agentName}");
-                    await agent.ExecuteAsync(state);
-                    return;
-                }
+                SessionId = sessionId,
+                TestProjectPath = session.TargetProject,
+                SourceProjectPath = session.SourceProject,
+                TargetProjectPath = session.TargetProject,
+                TestCases = testCases,
+                Settings = settings,
+                PipelineStatus = "En_Cours"
+            };
+
+            var pending = state.TestCases.Where(t => t.Status == TestStatus.EnAttenteDecision).ToList();
+            if (pending.Count > 0)
+                throw new Exception($"{pending.Count} test(s) sont encore en attente de dÃ©cision humaine.");
+
+            await RunFixAndVerifyLoopAsync(state);
+            return state;
+        }
+
+        private async Task RunFixAndVerifyLoopAsync(AgentState state)
+        {
+            int maxRetries = state.Settings.MaxRetries;
+
+            for (int attempt = 0; attempt < maxRetries; attempt++)
+            {
+                var toFix = state.TestCases.Where(t =>
+                    (t.Action == TestAction.FixTest || t.Action == TestAction.FixCode) &&
+                    t.Status == TestStatus.Red).ToList();
+
+                if (toFix.Count == 0) break;
+
+                _logger.LogInformation("[Orchestrateur] Tentative {N}/{Max}", attempt + 1, maxRetries);
+
+                await RunAgentAsync(_fixer, state);
+                await RunAgentAsync(_runner, state);
+
+                int stillRed = state.TestCases.Count(t =>
+                    t.Status == TestStatus.Red && t.Action != TestAction.Ignore);
+                if (stillRed == 0) break;
             }
-            _logger.LogError($"[Pipeline] Agent {agentName} non trouvé dans le conteneur DI.");
+
+            bool allDone = state.TestCases.All(t =>
+                t.Status == TestStatus.Green ||
+                t.Status == TestStatus.Ignored ||
+                t.Action == TestAction.Ignore);
+
+            state.IsFinished = true;
+            state.PipelineStatus = allDone ? "TerminÃ©" : "EchecPartiel";
+
+            await SaveSessionState(state, state.PipelineStatus);
+            _logger.LogInformation("[Orchestrateur] Pipeline terminÃ© : {Status}", state.PipelineStatus);
+        }
+
+        private async Task RunAgentAsync(IAgent agent, AgentState state)
+        {
+            _logger.LogInformation("[Orchestrateur] â†’ {Name}", agent.Name);
+            await _db.LogCommunicationAsync(state.SessionId, agent.Name, "DÃ©but");
+            try
+            {
+                await agent.ExecuteAsync(state);
+                await _db.LogCommunicationAsync(state.SessionId, agent.Name, "SuccÃ¨s");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Orchestrateur] Erreur dans {Name}", agent.Name);
+                await _db.LogCommunicationAsync(state.SessionId, agent.Name, $"Erreur : {ex.Message}");
+                throw;
+            }
+        }
+
+        private async Task SaveSessionState(AgentState state, string? status = null)
+        {
+            var json = JsonConvert.SerializeObject(new
+            {
+                Total = state.TestCases.Count,
+                Green = state.TestCases.Count(t => t.Status == TestStatus.Green),
+                Red = state.TestCases.Count(t => t.Status == TestStatus.Red),
+                Ignored = state.TestCases.Count(t => t.Status == TestStatus.Ignored),
+                AwaitingDecision = state.TestCases.Count(t => t.Status == TestStatus.EnAttenteDecision)
+            });
+            await _db.UpdateSessionStateAsync(state.SessionId, json, status ?? state.PipelineStatus);
         }
     }
 }

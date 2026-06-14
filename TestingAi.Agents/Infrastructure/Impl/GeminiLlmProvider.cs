@@ -23,8 +23,8 @@ namespace TestingAi.Agents.Infrastructure.Impl
         {
             try
             {
-                var url = $"https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key={_apiKey}";
-                
+                var url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={_apiKey}";
+
                 var requestBody = new
                 {
                     contents = new[]
@@ -41,7 +41,7 @@ namespace TestingAi.Agents.Infrastructure.Impl
 
                 if (response.IsSuccessStatusCode)
                 {
-                    dynamic result = JsonConvert.DeserializeObject(responseString);
+                    dynamic result = JsonConvert.DeserializeObject(responseString)!;
                     string text = result.candidates[0].content.parts[0].text;
                     return new LlmResponse { Content = text, IsSuccess = true };
                 }
