@@ -4,7 +4,8 @@ namespace TestingAi.Agents.Domain.Intf.Models
     {
         Gemini,
         OpenAi,
-        Copilot // Généralement via OpenAi SDK
+        Anthropic, // Claude
+        Copilot    // Généralement via le SDK OpenAi
     }
 
     public class LlmResponse

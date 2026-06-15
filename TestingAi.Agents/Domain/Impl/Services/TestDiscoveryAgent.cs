@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -29,16 +30,18 @@ namespace TestingAi.Agents.Domain.Impl.Services
                 throw new DirectoryNotFoundException($"Projet de tests introuvable : {state.TestProjectPath}");
 
             var csFiles = Directory.GetFiles(state.TestProjectPath, "*.cs", SearchOption.AllDirectories)
-                .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar)
-                         && !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar))
+                .Where(NotBuildArtifact)
                 .ToList();
 
             _logger.LogInformation("[Découverte] {Count} fichiers C# trouvés.", csFiles.Count);
 
+            // Indexer les fichiers source (chemin + contenu) pour résoudre SourceFilePath — requis par l'action FixCode.
+            var sourceIndex = BuildSourceIndex(state);
+
             foreach (var file in csFiles)
             {
                 var content = await File.ReadAllTextAsync(file);
-                var methods = ExtractTestMethods(content, file, state.SessionId);
+                var methods = ExtractTestMethods(content, file, state.SessionId, sourceIndex);
 
                 foreach (var tc in methods)
                 {
@@ -51,18 +54,47 @@ namespace TestingAi.Agents.Domain.Impl.Services
             _logger.LogInformation("[Découverte] {Count} tests découverts.", state.TestCases.Count);
         }
 
-        private System.Collections.Generic.List<TestCase> ExtractTestMethods(string content, string filePath, int sessionId)
-        {
-            var results = new System.Collections.Generic.List<TestCase>();
+        private static bool NotBuildArtifact(string f) =>
+            !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar)
+            && !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar);
 
-            // Extraire le namespace/classe
+        private List<(string Path, string Content)> BuildSourceIndex(AgentState state)
+        {
+            var roots = new List<string>();
+            if (!string.IsNullOrWhiteSpace(state.SourceProjectPath) && Directory.Exists(state.SourceProjectPath))
+                roots.Add(state.SourceProjectPath);
+            // Repli : le code source peut résider dans le projet de tests lui-même.
+            roots.Add(state.TestProjectPath);
+
+            var index = new List<(string, string)>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var root in roots.Where(Directory.Exists))
+            {
+                foreach (var f in Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories).Where(NotBuildArtifact))
+                {
+                    if (!seen.Add(f)) continue;
+                    try { index.Add((f, File.ReadAllText(f))); }
+                    catch { /* fichier illisible ignoré */ }
+                }
+            }
+
+            _logger.LogInformation("[Découverte] {Count} fichier(s) source indexé(s) pour FixCode.", index.Count);
+            return index;
+        }
+
+        private List<TestCase> ExtractTestMethods(string content, string filePath, int sessionId, List<(string Path, string Content)> sourceIndex)
+        {
+            var results = new List<TestCase>();
+
             var nsMatch = Regex.Match(content, @"namespace\s+([\w.]+)");
             var classMatch = Regex.Match(content, @"(?:public|internal)\s+(?:partial\s+)?class\s+(\w+)");
             var ns = nsMatch.Success ? nsMatch.Groups[1].Value : "";
             var className = classMatch.Success ? classMatch.Groups[1].Value : Path.GetFileNameWithoutExtension(filePath);
             var fullClass = string.IsNullOrEmpty(ns) ? className : $"{ns}.{className}";
 
-            // Détecter les attributs de test (xUnit, NUnit, MSTest)
+            var sourceFilePath = ResolveSourceFile(className, filePath, sourceIndex);
+
             var testAttrPattern = @"\[(?:Fact|Theory|Test|TestMethod|TestCase)[^\]]*\]";
             var methodPattern = new Regex(
                 testAttrPattern + @"[\s\S]*?" +
@@ -79,7 +111,7 @@ namespace TestingAi.Agents.Domain.Impl.Services
                     ClassName = fullClass,
                     MethodName = methodName,
                     TestFilePath = filePath,
-                    SourceFilePath = "",
+                    SourceFilePath = sourceFilePath,
                     Status = TestStatus.Pending,
                     Action = TestAction.None,
                     CreatedAt = DateTime.UtcNow.ToString("o")
@@ -87,6 +119,41 @@ namespace TestingAi.Agents.Domain.Impl.Services
             }
 
             return results;
+        }
+
+        // Déduit le fichier source testé depuis le nom de la classe de test.
+        // Ex. : "CalculatorTests" -> classe "Calculator" -> recherche `class Calculator` dans l'index source.
+        private string ResolveSourceFile(string testClassName, string testFilePath, List<(string Path, string Content)> sourceIndex)
+        {
+            var candidate = StripTestAffix(testClassName);
+            if (string.IsNullOrEmpty(candidate)) return "";
+
+            var declRegex = new Regex($@"\b(?:class|record|struct|interface)\s+{Regex.Escape(candidate)}\b");
+
+            foreach (var (path, text) in sourceIndex)
+            {
+                if (string.Equals(path, testFilePath, StringComparison.OrdinalIgnoreCase)) continue;
+                if (declRegex.IsMatch(text))
+                {
+                    _logger.LogInformation("[Découverte] Source de {Class} → {File}", candidate, path);
+                    return path;
+                }
+            }
+
+            _logger.LogInformation("[Découverte] Aucun fichier source trouvé pour {Class} (FixCode indisponible).", candidate);
+            return "";
+        }
+
+        private static string StripTestAffix(string className)
+        {
+            foreach (var suffix in new[] { "Tests", "Test", "Specs", "Spec", "Fixture" })
+            {
+                if (className.EndsWith(suffix, StringComparison.Ordinal) && className.Length > suffix.Length)
+                    return className.Substring(0, className.Length - suffix.Length);
+            }
+            if (className.StartsWith("Test", StringComparison.Ordinal) && className.Length > 4)
+                return className.Substring(4);
+            return className;
         }
     }
 }

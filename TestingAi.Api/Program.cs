@@ -27,6 +27,8 @@ builder.Services.AddSingleton<ILlmProvider>(sp =>
     new GeminiLlmProvider(config["GeminiApiKey"] ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY")));
 builder.Services.AddSingleton<ILlmProvider>(sp =>
     new OpenAiLlmProvider(config["OpenAiApiKey"] ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY")));
+builder.Services.AddSingleton<ILlmProvider>(sp =>
+    new AnthropicLlmProvider(config["AnthropicApiKey"] ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")));
 builder.Services.AddSingleton<ILlmService, LlmService>();
 builder.Services.AddSingleton<TestDiscoveryAgent>();
 builder.Services.AddSingleton<TestRunnerAgent>();

@@ -35,10 +35,15 @@ namespace TestingAi.Agents.Domain.Impl.Services
                     ? p : LlmProviderType.Gemini;
             }
 
-            var provider = _providers.FirstOrDefault(p => p.ProviderType == providerType) 
-                           ?? _providers.First();
+            var provider = _providers.FirstOrDefault(p => p.ProviderType == providerType);
+            if (provider == null)
+            {
+                var available = string.Join(", ", _providers.Select(p => p.ProviderType));
+                _logger.LogError("[LLM] Provider '{Requested}' non enregistré. Providers disponibles : {Available}", providerType, available);
+                throw new Exception($"Provider LLM '{providerType}' non disponible. Providers enregistrés : {available}.");
+            }
 
-            _logger.LogDebug($"[LLM] Appel au provider {providerType} pour l'agent {agentName}.");
+            _logger.LogInformation("[LLM] Appel au provider {Provider} pour l'agent {Agent}.", providerType, agentName);
 
             await _dbContext.SavePrivateMemoryAsync(sessionId, agentName, "User", prompt);
             if (systemMessage != null)
@@ -48,12 +53,12 @@ namespace TestingAi.Agents.Domain.Impl.Services
 
             if (response.IsSuccess)
             {
-                _logger.LogDebug($"[LLM] R�ponse re�ue de {providerType}.");
+                _logger.LogDebug("[LLM] Réponse reçue de {Provider}.", providerType);
                 await _dbContext.SavePrivateMemoryAsync(sessionId, agentName, "Assistant", response.Content);
                 return response.Content;
             }
 
-            _logger.LogError($"[LLM] Erreur ({providerType}) : {response.ErrorMessage}");
+            _logger.LogError("[LLM] Erreur ({Provider}) : {Error}", providerType, response.ErrorMessage);
             throw new Exception($"Erreur LLM ({providerType}): {response.ErrorMessage}");
         }
     }
