@@ -8,6 +8,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using TestingAi.Agents.Domain.Impl.Models;
 using TestingAi.Agents.Domain.Impl.Services;
+using TestingAi.Agents.Domain.Intf.Models;
 using TestingAi.Agents.Domain.Intf.Services;
 using TestingAi.Agents.Infrastructure.Impl;
 
@@ -184,13 +185,22 @@ app.MapGet("/api/settings", async (IDbContext dbCtx) =>
     return Results.Ok(new { s.HumanInterventionEnabled, s.MaxRetries, s.PreferredProvider });
 }).WithName("GetSettings").WithOpenApi();
 
-app.MapPut("/api/settings", async (UpdateSettingsRequest req, IDbContext dbCtx) =>
+app.MapPut("/api/settings", async (UpdateSettingsRequest req, IDbContext dbCtx, IEnumerable<ILlmProvider> providers) =>
 {
+    var requested = req.PreferredProvider ?? "Gemini";
+    if (!Enum.TryParse<LlmProviderType>(requested, true, out var providerType))
+        return Results.BadRequest(new { error = $"Provider inconnu : '{requested}'." });
+    if (!providers.Any(p => p.ProviderType == providerType))
+    {
+        var available = string.Join(", ", providers.Select(p => p.ProviderType));
+        return Results.BadRequest(new { error = $"Provider '{providerType}' non disponible. Providers enregistrés : {available}." });
+    }
+
     var s = new PipelineSettings
     {
         HumanInterventionEnabled = req.HumanInterventionEnabled,
         MaxRetries = req.MaxRetries,
-        PreferredProvider = req.PreferredProvider ?? "Gemini"
+        PreferredProvider = providerType.ToString()
     };
     await dbCtx.UpdateSettingsAsync(s);
     return Results.Ok(new { message = "Paramètres mis à jour.", s.HumanInterventionEnabled, s.MaxRetries, s.PreferredProvider });
