@@ -26,6 +26,9 @@ namespace TestingAi.Agents.Domain.Intf.Services
         Task<PipelineSettings> GetSettingsAsync();
         Task UpdateSettingsAsync(PipelineSettings settings);
 
+        // Private memory
+        Task SavePrivateMemoryAsync(int sessionId, string agentName, string role, string content);
+
         // Logs
         Task LogCommunicationAsync(int sessionId, string stepName, string actionSummary);
         Task<IEnumerable<AgentA2ACommunication>> GetCommunicationsAsync(int sessionId);

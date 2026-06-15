@@ -28,12 +28,14 @@ namespace TestingAi.Agents.Domain.Impl.Services
         {
             _logger.LogInformation("[Exécution] Lancement des tests dans : {Path}", state.TestProjectPath);
 
-            var trxPath = Path.Combine(Path.GetTempPath(), $"testresults_{state.SessionId}_{Guid.NewGuid():N}.trx");
+            var resultsDir = Path.Combine(Path.GetTempPath(), $"trx_{state.SessionId}_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(resultsDir);
+            var trxPath = Path.Combine(resultsDir, "results.trx");
 
             var (exitCode, output, error) = await _runner.RunAsync(
                 state.TestProjectPath,
                 "dotnet",
-                $"test \"{state.TestProjectPath}\" --logger \"trx;LogFileName={trxPath}\" --no-build 2>&1");
+                $"test \"{state.TestProjectPath}\" --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
 
             _logger.LogInformation("[Exécution] dotnet test terminé (code={Code})", exitCode);
 
@@ -41,16 +43,21 @@ namespace TestingAi.Agents.Domain.Impl.Services
             foreach (var tc in state.TestCases)
                 await _db.UpdateTestCaseStatusAsync(tc.Id, TestStatus.Running);
 
-            if (File.Exists(trxPath))
+            string? foundTrx = File.Exists(trxPath)
+                ? trxPath
+                : (Directory.Exists(resultsDir) ? Directory.GetFiles(resultsDir, "*.trx").FirstOrDefault() : null);
+
+            if (foundTrx != null)
             {
-                await ParseTrxResultsAsync(trxPath, state);
-                File.Delete(trxPath);
+                await ParseTrxResultsAsync(foundTrx, state);
             }
             else
             {
                 _logger.LogWarning("[Exécution] Fichier TRX introuvable. Utilisation de la sortie console.");
-                ParseConsoleOutput(output + error, state);
+                ParseConsoleOutput(output + "\n" + error, state);
             }
+
+            try { if (Directory.Exists(resultsDir)) Directory.Delete(resultsDir, true); } catch { }
 
             // Sauvegarder les statuts
             foreach (var tc in state.TestCases)

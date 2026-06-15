@@ -12,5 +12,12 @@ namespace TestingAi.Agents.Domain.Impl.Models
         public PipelineSettings Settings { get; set; } = new();
         public string PipelineStatus { get; set; } = "En_Cours";
         public bool IsFinished { get; set; } = false;
+
+        // Champs utilisés par les agents historiques (analyse / génération)
+        public string CurrentFilePath { get; set; } = string.Empty;
+        public CodeMetadata? Metadata { get; set; }
+        public string TestStrategy { get; set; } = string.Empty;
+        public string GeneratedTestCode { get; set; } = string.Empty;
+        public List<string> ValidationErrors { get; set; } = new();
     }
 }

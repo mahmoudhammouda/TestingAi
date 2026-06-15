@@ -192,9 +192,9 @@ namespace TestingAi.Agents.Infrastructure.Impl
             if (row == null) return new PipelineSettings();
             return new PipelineSettings
             {
-                HumanInterventionEnabled = (row.HumanInterventionEnabled ?? 0) == 1,
-                MaxRetries = row.MaxRetries ?? 3,
-                PreferredProvider = row.PreferredProvider ?? "Gemini"
+                HumanInterventionEnabled = Convert.ToInt32(row.HumanInterventionEnabled ?? 0) == 1,
+                MaxRetries = Convert.ToInt32(row.MaxRetries ?? 3),
+                PreferredProvider = (string)(row.PreferredProvider ?? "Gemini")
             };
         }
 
@@ -216,6 +216,14 @@ namespace TestingAi.Agents.Infrastructure.Impl
                 new { sessionId, stepName, actionSummary });
         }
 
+        public async Task SavePrivateMemoryAsync(int sessionId, string agentName, string role, string content)
+        {
+            using var db = GetConnection();
+            await db.ExecuteAsync(
+                "INSERT INTO AgentPrivateMemory (SessionId, AgentName, Role, Content) VALUES (@sessionId, @agentName, @role, @content)",
+                new { sessionId, agentName, role, content });
+        }
+
         public async Task<IEnumerable<AgentA2ACommunication>> GetCommunicationsAsync(int sessionId)
         {
             using var db = GetConnection();
@@ -235,8 +243,8 @@ namespace TestingAi.Agents.Infrastructure.Impl
             MethodName = r.MethodName ?? "",
             TestFilePath = r.TestFilePath ?? "",
             SourceFilePath = r.SourceFilePath ?? "",
-            Status = Enum.TryParse<TestStatus>(r.Status?.ToString(), out var s) ? s : TestStatus.Pending,
-            Action = Enum.TryParse<TestAction>(r.Action?.ToString(), out var a) ? a : TestAction.None,
+            Status = Enum.TryParse<TestStatus>((string?)(r.Status?.ToString()), out TestStatus s) ? s : TestStatus.Pending,
+            Action = Enum.TryParse<TestAction>((string?)(r.Action?.ToString()), out TestAction a) ? a : TestAction.None,
             ErrorMessage = r.ErrorMessage,
             FixApplied = r.FixApplied,
             RetryCount = (int)(r.RetryCount ?? 0),

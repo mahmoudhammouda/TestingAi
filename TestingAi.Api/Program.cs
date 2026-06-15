@@ -25,6 +25,8 @@ builder.Services.AddSingleton<IDbContext>(sp => new DbContext(dbPath));
 builder.Services.AddSingleton<IProcessRunner, ProcessRunner>();
 builder.Services.AddSingleton<ILlmProvider>(sp =>
     new GeminiLlmProvider(config["GeminiApiKey"] ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY")));
+builder.Services.AddSingleton<ILlmProvider>(sp =>
+    new OpenAiLlmProvider(config["OpenAiApiKey"] ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY")));
 builder.Services.AddSingleton<ILlmService, LlmService>();
 builder.Services.AddSingleton<TestDiscoveryAgent>();
 builder.Services.AddSingleton<TestRunnerAgent>();
@@ -151,7 +153,9 @@ app.MapPut("/api/tests/{id:int}/action", async (int id, SetActionRequest req, ID
     if (t == null) return Results.NotFound();
     if (!Enum.TryParse<TestAction>(req.Action, true, out var action))
         return Results.BadRequest(new { error = $"Action invalide : {req.Action}" });
-    if (action != TestAction.Ignore)
+    if (action == TestAction.Ignore)
+        await dbCtx.UpdateTestCaseStatusAsync(id, TestStatus.Ignored);
+    else
         await dbCtx.UpdateTestCaseStatusAsync(id, TestStatus.Red);
     await dbCtx.UpdateTestCaseActionAsync(id, action);
     return Results.Ok(new { id, action = action.ToString() });
@@ -164,7 +168,7 @@ app.MapPut("/api/tests/bulk-action", async (BulkActionRequest req, IDbContext db
     foreach (var id in req.TestIds)
     {
         if (await dbCtx.GetTestCaseAsync(id) == null) continue;
-        if (action != TestAction.Ignore) await dbCtx.UpdateTestCaseStatusAsync(id, TestStatus.Red);
+        await dbCtx.UpdateTestCaseStatusAsync(id, action == TestAction.Ignore ? TestStatus.Ignored : TestStatus.Red);
         await dbCtx.UpdateTestCaseActionAsync(id, action);
     }
     return Results.Ok(new { updated = req.TestIds.Length, action = action.ToString() });

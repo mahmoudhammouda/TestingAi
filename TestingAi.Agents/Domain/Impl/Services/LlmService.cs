@@ -23,7 +23,18 @@ namespace TestingAi.Agents.Domain.Impl.Services
 
         public async Task<string> AskAsync(int sessionId, string agentName, string prompt, string? systemMessage = null, LlmProviderType? preferredProvider = null)
         {
-            var providerType = preferredProvider ?? LlmProviderType.Gemini;
+            LlmProviderType providerType;
+            if (preferredProvider.HasValue)
+            {
+                providerType = preferredProvider.Value;
+            }
+            else
+            {
+                var settings = await _dbContext.GetSettingsAsync();
+                providerType = Enum.TryParse<LlmProviderType>(settings.PreferredProvider, true, out var p)
+                    ? p : LlmProviderType.Gemini;
+            }
+
             var provider = _providers.FirstOrDefault(p => p.ProviderType == providerType) 
                            ?? _providers.First();
 
@@ -37,7 +48,7 @@ namespace TestingAi.Agents.Domain.Impl.Services
 
             if (response.IsSuccess)
             {
-                _logger.LogDebug($"[LLM] Réponse reçue de {providerType}.");
+                _logger.LogDebug($"[LLM] Rï¿½ponse reï¿½ue de {providerType}.");
                 await _dbContext.SavePrivateMemoryAsync(sessionId, agentName, "Assistant", response.Content);
                 return response.Content;
             }

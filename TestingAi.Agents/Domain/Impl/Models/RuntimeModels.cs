@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace TestingAi.Agents.Domain.Impl.Models
 {
     public class TestingSession
@@ -27,5 +29,26 @@ namespace TestingAi.Agents.Domain.Impl.Models
         public string Role { get; set; } = string.Empty;
         public string Content { get; set; } = string.Empty;
         public string Timestamp { get; set; } = string.Empty;
+    }
+
+    public class CodeMetadata
+    {
+        public string ClassName { get; set; } = string.Empty;
+        public string Namespace { get; set; } = string.Empty;
+        public List<string> Dependencies { get; set; } = new();
+        public List<MethodMetadata> Methods { get; set; } = new();
+    }
+
+    public class MethodMetadata
+    {
+        public string Name { get; set; } = string.Empty;
+        public string ReturnType { get; set; } = string.Empty;
+        public List<ParameterMetadata> Parameters { get; set; } = new();
+    }
+
+    public class ParameterMetadata
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Type { get; set; } = string.Empty;
     }
 }
