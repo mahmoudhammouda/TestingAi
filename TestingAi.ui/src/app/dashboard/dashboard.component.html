@@ -18,6 +18,14 @@
         <span class="setting-label">Tentatives max</span>
         <input type="number" class="small-input" [(ngModel)]="settings.maxRetries" (change)="saveSettings()" min="1" max="10">
       </div>
+      <div class="setting-row mt-8">
+        <span class="setting-label">Fournisseur IA</span>
+        <select class="small-select" [(ngModel)]="settings.preferredProvider" (change)="saveSettings()">
+          <option value="OpenAi">OpenAI</option>
+          <option value="Gemini">Gemini</option>
+          <option value="Anthropic">Anthropic</option>
+        </select>
+      </div>
     </div>
 
     <div class="sessions-label">Sessions</div>
