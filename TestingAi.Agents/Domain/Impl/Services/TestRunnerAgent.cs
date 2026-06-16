@@ -106,8 +106,10 @@ namespace TestingAi.Agents.Domain.Impl.Services
             }
         }
 
-        private void ParseConsoleOutput(string output, AgentState state)
+                private void ParseConsoleOutput(string output, AgentState state)
         {
+            var buildErrors = ExtractBuildErrors(output);
+
             foreach (var tc in state.TestCases)
             {
                 if (output.Contains($"passed") && output.Contains(tc.MethodName))
@@ -117,9 +119,21 @@ namespace TestingAi.Agents.Domain.Impl.Services
                     tc.Status = TestStatus.Red;
                     var lines = output.Split('\n');
                     var errLine = lines.FirstOrDefault(l => l.Contains(tc.MethodName) && l.Contains("Failed"));
-                    tc.ErrorMessage = errLine?.Trim() ?? "Échec lors de l'exécution.";
+                    tc.ErrorMessage = errLine?.Trim()
+                        ?? (buildErrors.Length > 0
+                            ? $"Erreur de compilation :\n{buildErrors}"
+                            : "Échec lors de l'exécution.");
                 }
             }
+        }
+
+        private static string ExtractBuildErrors(string output)
+        {
+            var errorLines = output.Split('\n')
+                .Where(l => (l.Contains(": error ") || l.Contains(": Error ")) && l.Trim().Length > 0)
+                .Take(8)
+                .Select(l => l.Trim());
+            return string.Join("\n", errorLines);
         }
     }
 }
