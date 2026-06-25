@@ -35,7 +35,8 @@ namespace TestingAi.Agents.Domain.Impl.Services
             var (exitCode, output, error) = await _runner.RunAsync(
                 state.TestProjectPath,
                 "dotnet",
-                $"test \"{state.TestProjectPath}\" --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+                $"test \"{state.TestProjectPath}\" --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"",
+                timeoutSeconds: 120);
 
             _logger.LogInformation("[Exécution] dotnet test terminé (code={Code})", exitCode);
 
@@ -66,6 +67,28 @@ namespace TestingAi.Agents.Domain.Impl.Services
             int green = state.TestCases.Count(t => t.Status == TestStatus.Green);
             int red = state.TestCases.Count(t => t.Status == TestStatus.Red);
             _logger.LogInformation("[Exécution] Résultats : {Green} verts, {Red} rouges.", green, red);
+
+            // Trace de la commande lancée et de son résultat pour la « Communication agentique ».
+            var cmd = $"dotnet test \"{state.TestProjectPath}\" --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"";
+            var perTest = string.Join("\n", state.TestCases.Select(t =>
+                $"  {(t.Status == TestStatus.Green ? "✅" : "❌")} {t.MethodName}" +
+                (t.Status == TestStatus.Red && !string.IsNullOrWhiteSpace(t.ErrorMessage)
+                    ? $" — {FirstLine(t.ErrorMessage)}" : string.Empty)));
+            var combined = string.Join("\n",
+                new[] { output, error }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            var runResult =
+                $"Code de sortie : {exitCode}\n" +
+                $"Résultat : {green} test(s) ✅ vert(s), {red} test(s) ❌ rouge(s)\n\n" +
+                $"{perTest}\n\n— Sortie console —\n{AgentDiagnostics.Truncate(combined)}";
+            await _db.LogCommunicationAsync(
+                state.SessionId, Name,
+                $"dotnet test : {green} vert(s), {red} rouge(s)", cmd, runResult);
+        }
+
+        private static string FirstLine(string s)
+        {
+            var idx = s.IndexOf('\n');
+            return (idx >= 0 ? s.Substring(0, idx) : s).Trim();
         }
 
         private async Task ParseTrxResultsAsync(string trxPath, AgentState state)
@@ -109,6 +132,8 @@ namespace TestingAi.Agents.Domain.Impl.Services
                 private void ParseConsoleOutput(string output, AgentState state)
         {
             var buildErrors = ExtractBuildErrors(output);
+            var timeoutLine = output.Split('\n')
+                .FirstOrDefault(l => l.Contains("Délai dépassé"))?.Trim();
 
             foreach (var tc in state.TestCases)
             {
@@ -122,7 +147,9 @@ namespace TestingAi.Agents.Domain.Impl.Services
                     tc.ErrorMessage = errLine?.Trim()
                         ?? (buildErrors.Length > 0
                             ? $"Erreur de compilation :\n{buildErrors}"
-                            : "Échec lors de l'exécution.");
+                            : (!string.IsNullOrEmpty(timeoutLine)
+                                ? timeoutLine
+                                : "Échec lors de l'exécution."));
                 }
             }
         }

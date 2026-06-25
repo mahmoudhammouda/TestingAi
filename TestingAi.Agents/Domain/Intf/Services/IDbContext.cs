@@ -13,6 +13,8 @@ namespace TestingAi.Agents.Domain.Intf.Services
         Task<TestingSession?> GetSessionAsync(int sessionId);
         Task<IEnumerable<TestingSession>> GetAllSessionsAsync();
         Task UpdateSessionStateAsync(int sessionId, string globalState, string status);
+        Task UpdateSessionGenerationAsync(int sessionId, string metadata, string testStrategy);
+        Task ResetSessionForRerunAsync(int sessionId);
 
         // TestCases
         Task<int> UpsertTestCaseAsync(TestCase testCase);
@@ -28,9 +30,11 @@ namespace TestingAi.Agents.Domain.Intf.Services
 
         // Private memory
         Task SavePrivateMemoryAsync(int sessionId, string agentName, string role, string content);
+        Task<IEnumerable<AgentPrivateMemory>> GetPrivateMemoryAsync(int sessionId);
 
         // Logs
         Task LogCommunicationAsync(int sessionId, string stepName, string actionSummary);
+        Task LogCommunicationAsync(int sessionId, string stepName, string actionSummary, string? commandText, string? commandOutput);
         Task<IEnumerable<AgentA2ACommunication>> GetCommunicationsAsync(int sessionId);
     }
 }

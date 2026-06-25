@@ -22,18 +22,18 @@ namespace TestingAi.Agents.Domain.Impl.Services
 
         public async Task ExecuteAsync(AgentState state)
         {
-            _logger.LogInformation($"[{Name}] Début de l'exécution pour la session {state.SessionId}.");
-            await _dbContext.LogCommunicationAsync(state.SessionId, Name, "Début de l'exécution.");
+            _logger.LogInformation($"[{Name}] DÃ©but de l'exÃ©cution pour la session {state.SessionId}.");
+            await _dbContext.LogCommunicationAsync(state.SessionId, Name, "DÃ©but de l'exÃ©cution.");
             
             try
             {
                 await ProcessInternalAsync(state);
-                _logger.LogInformation($"[{Name}] Fin de l'exécution avec succès.");
-                await _dbContext.LogCommunicationAsync(state.SessionId, Name, "Fin de l'exécution avec succès.");
+                _logger.LogInformation($"[{Name}] Fin de l'exÃ©cution avec succÃ¨s.");
+                await _dbContext.LogCommunicationAsync(state.SessionId, Name, "Fin de l'exÃ©cution avec succÃ¨s.");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"[{Name}] Erreur lors de l'exécution : {ex.Message}");
+                _logger.LogError(ex, $"[{Name}] Erreur lors de l'exÃ©cution : {ex.Message}");
                 await _dbContext.LogCommunicationAsync(state.SessionId, Name, $"Erreur : {ex.Message}");
                 throw;
             }

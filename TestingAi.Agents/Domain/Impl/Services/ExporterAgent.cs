@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using TestingAi.Agents.Domain.Impl.Models;
@@ -30,9 +31,19 @@ namespace TestingAi.Agents.Domain.Impl.Services
 
             string fileName = $"{state.Metadata?.ClassName}Tests.cs";
             string fullPath = Path.Combine(state.TargetProjectPath, fileName);
-            
-            _logger.LogInformation($"�criture du fichier : {fullPath}");
-            await File.WriteAllTextAsync(fullPath, cleanCode.Trim());
+            string finalCode = cleanCode.Trim();
+
+            _logger.LogInformation($"Écriture du fichier : {fullPath}");
+            await File.WriteAllTextAsync(fullPath, finalCode);
+
+            // Trace de l'action déterministe et de son résultat pour la « Communication agentique ».
+            int byteCount = Encoding.UTF8.GetByteCount(finalCode);
+            int lineCount = finalCode.Length == 0 ? 0 : finalCode.Split('\n').Length;
+            await _dbContext.LogCommunicationAsync(
+                state.SessionId, Name,
+                $"Écriture du fichier {fileName}",
+                $"Écriture du fichier de test sur le disque : {fullPath}",
+                $"✅ Fichier écrit : {fullPath}\n{lineCount} ligne(s) • {byteCount} octet(s)");
         }
     }
 }

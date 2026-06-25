@@ -19,5 +19,8 @@ namespace TestingAi.Agents.Domain.Impl.Models
         public string TestStrategy { get; set; } = string.Empty;
         public string GeneratedTestCode { get; set; } = string.Empty;
         public List<string> ValidationErrors { get; set; } = new();
+
+        // Motif d'échec du pipeline (renseigné lorsque la session passe en "Erreur").
+        public string ErrorMessage { get; set; } = string.Empty;
     }
 }

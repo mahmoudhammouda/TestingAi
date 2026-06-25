@@ -1,0 +1,122 @@
+<div class="backdrop" (click)="cancel()">
+  <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
+
+    <div class="modal-header">
+      <div class="modal-title">
+        <span class="modal-icon">⚡</span>
+        <h2>Nouvelle session</h2>
+      </div>
+      <button class="close-btn" (click)="cancel()" title="Fermer">✕</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab" [class.active]="activeTab === 'file'" (click)="selectTab('file')">
+        <span class="tab-icon">📂</span> Importer un fichier .cs
+      </button>
+      <button class="tab" [class.active]="activeTab === 'code'" (click)="selectTab('code')">
+        <span class="tab-icon">✏️</span> Coller du code C#
+      </button>
+      <button class="tab" [class.active]="activeTab === 'path'" (click)="selectTab('path')">
+        <span class="tab-icon">📁</span> Chemin projet
+      </button>
+    </div>
+
+    <div class="modal-body">
+
+      <!-- ── Onglet : Importer un fichier ─────────────────────────────────── -->
+      <ng-container *ngIf="activeTab === 'file'">
+        <div class="drop-zone"
+          [class.drag-over]="dragOver"
+          [class.has-file]="!!importedFileName"
+          (dragover)="onDragOver($event)"
+          (dragleave)="onDragLeave()"
+          (drop)="onDrop($event)"
+          (click)="fileInput.click()">
+
+          <input #fileInput type="file" accept=".cs" hidden (change)="onFileChange($event)">
+
+          <ng-container *ngIf="!importedFileName">
+            <div class="dz-icon">📂</div>
+            <div class="dz-title">Glissez un fichier <code>.cs</code> ici</div>
+            <div class="dz-sub">ou cliquez pour parcourir vos fichiers</div>
+          </ng-container>
+
+          <ng-container *ngIf="importedFileName">
+            <div class="dz-icon">✅</div>
+            <div class="dz-title file-ok">{{ importedFileName }}</div>
+            <div class="dz-sub">{{ lineCount }} ligne(s) — cliquez pour changer</div>
+          </ng-container>
+        </div>
+
+        <div class="code-preview" *ngIf="sourceCode">
+          <div class="preview-header">
+            <span>Aperçu</span>
+            <button class="clear-btn" (click)="clearFile(); $event.stopPropagation()">✕ Effacer</button>
+          </div>
+          <pre class="preview-code">{{ codePreview }}</pre>
+        </div>
+      </ng-container>
+
+      <!-- ── Onglet : Coller du code ──────────────────────────────────────── -->
+      <ng-container *ngIf="activeTab === 'code'">
+        <div class="field">
+          <label class="field-label">
+            Nom du fichier
+            <span class="field-hint">optionnel</span>
+          </label>
+          <input class="text-input" [(ngModel)]="fileName" placeholder="MyService.cs" spellcheck="false">
+        </div>
+        <div class="field">
+          <label class="field-label">
+            Code C#
+            <span class="field-hint" *ngIf="lineCount > 0">{{ lineCount }} ligne(s)</span>
+          </label>
+          <textarea
+            class="code-editor"
+            [(ngModel)]="sourceCode"
+            spellcheck="false"
+            placeholder="// Collez votre code C# ici&#10;&#10;public class MyService&#10;{&#10;    // ...&#10;}">
+          </textarea>
+        </div>
+      </ng-container>
+
+      <!-- ── Onglet : Chemin projet ───────────────────────────────────────── -->
+      <ng-container *ngIf="activeTab === 'path'">
+        <div class="path-info">
+          Spécifiez les chemins de vos projets .NET sur le serveur.
+        </div>
+        <div class="field">
+          <label class="field-label">
+            Projet de tests
+            <span class="required">requis</span>
+          </label>
+          <input class="text-input mono" [(ngModel)]="testPath"
+            placeholder="ex: C:\Projects\MyApp.Tests ou /home/user/app/tests">
+        </div>
+        <div class="field">
+          <label class="field-label">
+            Projet source
+            <span class="field-hint">optionnel</span>
+          </label>
+          <input class="text-input mono" [(ngModel)]="sourcePath"
+            placeholder="ex: C:\Projects\MyApp ou /home/user/app/src">
+        </div>
+      </ng-container>
+
+    </div>
+
+    <div class="modal-footer">
+      <div class="error-msg" *ngIf="error">
+        <span class="error-icon">⚠</span> {{ error }}
+      </div>
+      <div class="footer-btns">
+        <button class="btn-cancel" (click)="cancel()" [disabled]="isLoading">Annuler</button>
+        <button class="btn-run" (click)="submit()" [disabled]="!canSubmit">
+          <span class="btn-spinner" *ngIf="isLoading"></span>
+          {{ isLoading ? 'Démarrage en cours…' : '▶ Lancer la session' }}
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>

@@ -61,7 +61,9 @@ namespace TestingAi.Agents.Domain.Impl.Services
 
         private async Task<TestAction> DecideWithAiAsync(int sessionId, TestCase tc)
         {
-            var prompt = $@"Analyse ce test unitaire C# qui a échoué et décide de l'action à prendre.
+            var prompt = $@"Objectif : Diagnostiquer le test {tc.TestName} (corriger le test, corriger le code source, ou ignorer)
+
+Analyse ce test unitaire C# qui a échoué et décide de l'action à prendre.
 
 Nom du test : {tc.TestName}
 Fichier     : {tc.TestFilePath}

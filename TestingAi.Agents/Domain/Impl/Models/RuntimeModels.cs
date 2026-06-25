@@ -10,6 +10,8 @@ namespace TestingAi.Agents.Domain.Impl.Models
         public string GlobalState { get; set; } = "{}";
         public string Status { get; set; } = "En_Cours";
         public string CreatedAt { get; set; } = string.Empty;
+        public string Metadata { get; set; } = string.Empty;
+        public string TestStrategy { get; set; } = string.Empty;
     }
 
     public class AgentA2ACommunication
@@ -19,6 +21,10 @@ namespace TestingAi.Agents.Domain.Impl.Models
         public string StepName { get; set; } = string.Empty;
         public string ActionSummary { get; set; } = string.Empty;
         public string Timestamp { get; set; } = string.Empty;
+        // Commande lancée + résultat (agents déterministes / TestRunner) ; null pour
+        // les simples événements de cycle de vie (Début/Succès/Erreur).
+        public string? CommandText { get; set; }
+        public string? CommandOutput { get; set; }
     }
 
     public class AgentPrivateMemory

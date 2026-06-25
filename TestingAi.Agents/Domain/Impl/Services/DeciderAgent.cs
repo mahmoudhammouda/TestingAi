@@ -15,14 +15,14 @@ namespace TestingAi.Agents.Domain.Impl.Services
 
         protected override async Task ProcessInternalAsync(AgentState state)
         {
-            _logger.LogInformation("Définition de la stratégie de test...");
-            string prompt = $"Analyse les métadonnées suivantes pour la classe {state.Metadata?.ClassName} et définit une stratégie de test unitaire complète (cas nominaux, limites, erreurs).\n" +
-                            $"Métadonnées : {JsonConvert.SerializeObject(state.Metadata)}";
+            _logger.LogInformation("DÃ©finition de la stratÃ©gie de test...");
+            string prompt = $"Analyse les mÃ©tadonnÃ©es suivantes pour la classe {state.Metadata?.ClassName} et dÃ©finit une stratÃ©gie de test unitaire complÃ¨te (cas nominaux, limites, erreurs).\n" +
+                            $"MÃ©tadonnÃ©es : {JsonConvert.SerializeObject(state.Metadata)}";
 
-            string system = "Tu es un expert en test unitaires .NET. Réponds en Français. Propose une liste de scénarios de tests à implémenter.";
+            string system = "Tu es un expert en test unitaires .NET. RÃ©ponds en FranÃ§ais. Propose une liste de scÃ©narios de tests Ã  implÃ©menter.";
 
             state.TestStrategy = await _llmService.AskAsync(state.SessionId, Name, prompt, system);
-            _logger.LogInformation("Stratégie de test définie avec succès.");
+            _logger.LogInformation("StratÃ©gie de test dÃ©finie avec succÃ¨s.");
         }
     }
 }

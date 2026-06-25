@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using TestingAi.Agents.Domain.Impl.Models;
@@ -19,20 +20,32 @@ namespace TestingAi.Agents.Domain.Impl.Services
 
         protected override async Task ProcessInternalAsync(AgentState state)
         {
-            _logger.LogInformation($"V�rification par build du projet : {state.TargetProjectPath}");
-            var result = await _processRunner.RunAsync(state.TargetProjectPath, "dotnet", "build");
+            _logger.LogInformation($"Vérification par build du projet : {state.TargetProjectPath}");
+            var result = await _processRunner.RunAsync(state.TargetProjectPath, "dotnet", "build", timeoutSeconds: 120);
 
             state.ValidationErrors.Clear();
             if (result.ExitCode != 0)
             {
-                _logger.LogWarning("�chec du build. M�tadonn�es d'erreurs extraites.");
+                _logger.LogWarning("Échec du build. Métadonnées d'erreurs extraites.");
                 state.ValidationErrors.Add(result.Error);
                 state.ValidationErrors.Add(result.Output);
             }
             else
             {
-                _logger.LogInformation("Build r�ussi.");
+                _logger.LogInformation("Build réussi.");
             }
+
+            // Trace de la commande lancée et de son résultat pour la « Communication agentique ».
+            var combined = string.Join("\n",
+                new[] { result.Output, result.Error }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            var verdict = result.ExitCode == 0
+                ? "✅ Build réussi — le code des tests compile."
+                : $"❌ Échec du build (code {result.ExitCode}) — erreurs de compilation.";
+            await _dbContext.LogCommunicationAsync(
+                state.SessionId, Name,
+                $"Commande dotnet build (code {result.ExitCode})",
+                $"dotnet build   (répertoire : {state.TargetProjectPath})",
+                $"Code de sortie : {result.ExitCode}\n{verdict}\n\n{AgentDiagnostics.Truncate(combined)}");
         }
     }
 }

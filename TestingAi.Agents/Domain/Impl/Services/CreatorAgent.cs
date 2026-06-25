@@ -10,28 +10,48 @@ namespace TestingAi.Agents.Domain.Impl.Services
     {
         public override string Name => "Creator";
 
-        public CreatorAgent(IDbContext dbContext, ILlmService llmService, ILogger<CreatorAgent> logger) 
+        public CreatorAgent(IDbContext dbContext, ILlmService llmService, ILogger<CreatorAgent> logger)
             : base(dbContext, llmService, logger) { }
 
         protected override async Task ProcessInternalAsync(AgentState state)
         {
-            _logger.LogInformation("Génération du code de test...");
-            string prompt = $"Génère UNIQUEMENT le code C# (sans backticks ```) pour les tests unitaires xUnit de la classe {state.Metadata?.ClassName}.\n" +
-                            $"Namespace original : {state.Metadata?.Namespace}\n" +
-                            $"Méthodes à tester : \n" +
-                            $"{string.Join("\n", state.Metadata?.Methods.Select(m => $"- {m.Name} ({string.Join(", ", m.Parameters.Select(p => p.Type + " " + p.Name))}) -> {m.ReturnType}"))}\n" +
-                            $"Dépendances détectées : {string.Join(", ", state.Metadata?.Dependencies ?? new System.Collections.Generic.List<string>())}\n" +
-                            $"Stratégie de test : {state.TestStrategy}\n" +
-                            $"IMPORTANT : \n" +
-                            $"- Ne redéfinis pas la classe {state.Metadata?.ClassName}.\n" +
-                            $"- Utilise UNIQUEMENT les noms de méthodes fournis ci-dessus pour les mocks.\n" +
-                            $"- NE PAS mettre de blocs de code Markdown (pas de ```csharp).\n" +
-                            (state.ValidationErrors.Count > 0 ? $"FIXE CES ERREURS : {string.Join("\n", state.ValidationErrors)}" : "");
+            _logger.LogInformation("GÃ©nÃ©ration du code de test...");
 
-            string system = "Tu es un développeur senior .NET. Tu écris du code de test C# pur, sans aucune balise markdown, prêt à être sauvegardé dans un fichier .cs.";
+            var meta = state.Metadata;
+            var ns = meta?.Namespace ?? "";
+            bool hasRealNs = !string.IsNullOrWhiteSpace(ns) && ns != "Global";
+            string usingSource = hasRealNs ? $"using {ns};\n" : "";
+            string testNamespace = hasRealNs ? $"{ns}.Tests" : "GeneratedTests";
+            string className = string.IsNullOrWhiteSpace(meta?.ClassName) ? "Code" : meta!.ClassName;
+
+            string methodsList = (meta?.Methods?.Count ?? 0) > 0
+                ? string.Join("\n", meta!.Methods.Select(m =>
+                    $"- {m.Name}({string.Join(", ", m.Parameters.Select(p => p.Type + " " + p.Name))}) -> {m.ReturnType}"))
+                : "(aucune mÃ©thode publique dÃ©tectÃ©e â€” teste le comportement observable de la classe)";
+
+            string prompt =
+                $"GÃ©nÃ¨re un FICHIER C# COMPLET et COMPILABLE de tests unitaires xUnit pour la classe `{className}`.\n\n" +
+                $"Structure EXACTE attendue au dÃ©but du fichier :\n" +
+                $"using Xunit;\n{usingSource}\nnamespace {testNamespace};\n\n" +
+                $"public class {className}Tests\n{{\n    // vos [Fact] / [Theory] ici\n}}\n\n" +
+                $"MÃ©thodes publiques Ã  tester :\n{methodsList}\n\n" +
+                (string.IsNullOrWhiteSpace(state.TestStrategy) ? "" : $"StratÃ©gie de test Ã  appliquer :\n{state.TestStrategy}\n\n") +
+                $"RÃˆGLES STRICTES :\n" +
+                $"- Retourne UNIQUEMENT du code C# brut, AUCUN bloc Markdown (pas de triples backticks).\n" +
+                $"- NE REDÃ‰FINIS PAS la classe `{className}` : elle provient du projet source rÃ©fÃ©rencÃ©.\n" +
+                $"- N'appelle que des membres rÃ©ellement listÃ©s ci-dessus.\n" +
+                $"- Chaque test porte [Fact] ou [Theory] et contient de vraies assertions Assert.*.\n" +
+                $"- Le fichier doit compiler tel quel." +
+                (state.ValidationErrors.Count > 0
+                    ? $"\n\nLe build PRÃ‰CÃ‰DENT a Ã‰CHOUÃ‰. Corrige prÃ©cisÃ©ment ces erreurs de compilation :\n{string.Join("\n", state.ValidationErrors)}"
+                    : "");
+
+            string system = "Tu es un dÃ©veloppeur senior .NET expert en tests unitaires xUnit. " +
+                            "Tu Ã©cris du code C# pur, complet et compilable, sans aucune balise Markdown, " +
+                            "prÃªt Ã  Ãªtre enregistrÃ© tel quel dans un fichier .cs.";
 
             state.GeneratedTestCode = await _llmService.AskAsync(state.SessionId, Name, prompt, system);
-            _logger.LogInformation("Code de test généré.");
+            _logger.LogInformation("Code de test gÃ©nÃ©rÃ© ({Len} caractÃ¨res).", state.GeneratedTestCode?.Length ?? 0);
         }
     }
 }

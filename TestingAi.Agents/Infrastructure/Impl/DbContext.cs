@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Dapper;
 using Microsoft.Data.Sqlite;
@@ -76,6 +77,22 @@ namespace TestingAi.Agents.Infrastructure.Impl
                 INSERT OR IGNORE INTO PipelineSettings (Id, HumanInterventionEnabled, MaxRetries, PreferredProvider)
                 VALUES (1, 0, 3, 'Gemini');
             ");
+
+            // ── Migrations légères (colonnes ajoutées après coup) ────────────────
+            await EnsureColumnAsync(db, "TestingSessions", "Metadata", "TEXT NOT NULL DEFAULT ''");
+            await EnsureColumnAsync(db, "TestingSessions", "TestStrategy", "TEXT NOT NULL DEFAULT ''");
+            // Commande lancée + résultat (agents déterministes / TestRunner) pour la timeline A2A.
+            await EnsureColumnAsync(db, "AgentA2ACommunication", "CommandText", "TEXT");
+            await EnsureColumnAsync(db, "AgentA2ACommunication", "CommandOutput", "TEXT");
+        }
+
+        // Ajoute une colonne si elle n'existe pas (SQLite n'a pas ADD COLUMN IF NOT EXISTS).
+        private static async Task EnsureColumnAsync(IDbConnection db, string table, string column, string definition)
+        {
+            var cols = await db.QueryAsync<dynamic>($"PRAGMA table_info({table})");
+            bool exists = cols.Any(c => string.Equals((string)c.name, column, StringComparison.OrdinalIgnoreCase));
+            if (!exists)
+                await db.ExecuteAsync($"ALTER TABLE {table} ADD COLUMN {column} {definition}");
         }
 
         // ── Sessions ─────────────────────────────────────────────────────────
@@ -108,6 +125,29 @@ namespace TestingAi.Agents.Infrastructure.Impl
             await db.ExecuteAsync(
                 "UPDATE TestingSessions SET GlobalState = @globalState, Status = @status WHERE Id = @sessionId",
                 new { sessionId, globalState, status });
+        }
+
+        public async Task UpdateSessionGenerationAsync(int sessionId, string metadata, string testStrategy)
+        {
+            using var db = GetConnection();
+            await db.ExecuteAsync(
+                "UPDATE TestingSessions SET Metadata = @metadata, TestStrategy = @testStrategy WHERE Id = @sessionId",
+                new { sessionId, metadata, testStrategy });
+        }
+
+        // Réinitialise une session pour une relance complète : supprime les tests,
+        // la timeline A2A et la mémoire des agents, et remet la session à l'état initial.
+        public async Task ResetSessionForRerunAsync(int sessionId)
+        {
+            using var db = GetConnection();
+            await db.ExecuteAsync(@"
+                DELETE FROM TestCases WHERE SessionId = @sessionId;
+                DELETE FROM AgentA2ACommunication WHERE SessionId = @sessionId;
+                DELETE FROM AgentPrivateMemory WHERE SessionId = @sessionId;
+                UPDATE TestingSessions
+                   SET GlobalState = '{}', Status = 'En_Cours', Metadata = '', TestStrategy = ''
+                 WHERE Id = @sessionId;",
+                new { sessionId });
         }
 
         // ── TestCases ─────────────────────────────────────────────────────────
@@ -208,12 +248,15 @@ namespace TestingAi.Agents.Infrastructure.Impl
 
         // ── Logs ──────────────────────────────────────────────────────────────
 
-        public async Task LogCommunicationAsync(int sessionId, string stepName, string actionSummary)
+        public Task LogCommunicationAsync(int sessionId, string stepName, string actionSummary)
+            => LogCommunicationAsync(sessionId, stepName, actionSummary, null, null);
+
+        public async Task LogCommunicationAsync(int sessionId, string stepName, string actionSummary, string? commandText, string? commandOutput)
         {
             using var db = GetConnection();
             await db.ExecuteAsync(
-                "INSERT INTO AgentA2ACommunication (SessionId, StepName, ActionSummary) VALUES (@sessionId, @stepName, @actionSummary)",
-                new { sessionId, stepName, actionSummary });
+                "INSERT INTO AgentA2ACommunication (SessionId, StepName, ActionSummary, CommandText, CommandOutput) VALUES (@sessionId, @stepName, @actionSummary, @commandText, @commandOutput)",
+                new { sessionId, stepName, actionSummary, commandText, commandOutput });
         }
 
         public async Task SavePrivateMemoryAsync(int sessionId, string agentName, string role, string content)
@@ -229,6 +272,14 @@ namespace TestingAi.Agents.Infrastructure.Impl
             using var db = GetConnection();
             return await db.QueryAsync<AgentA2ACommunication>(
                 "SELECT * FROM AgentA2ACommunication WHERE SessionId = @sessionId ORDER BY Timestamp",
+                new { sessionId });
+        }
+
+        public async Task<IEnumerable<AgentPrivateMemory>> GetPrivateMemoryAsync(int sessionId)
+        {
+            using var db = GetConnection();
+            return await db.QueryAsync<AgentPrivateMemory>(
+                "SELECT * FROM AgentPrivateMemory WHERE SessionId = @sessionId ORDER BY Id",
                 new { sessionId });
         }
 

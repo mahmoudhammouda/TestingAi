@@ -29,19 +29,7 @@
     </div>
 
     <div class="sessions-label">Sessions</div>
-    <button class="btn-new-session" (click)="showNewSession = !showNewSession">+ Nouvelle session</button>
-
-    <div class="new-session-form" *ngIf="showNewSession">
-      <input class="path-input" [(ngModel)]="newTestPath" placeholder="Chemin projet de tests (ex: C:\...\App.Tests)">
-      <input class="path-input" [(ngModel)]="newSourcePath" placeholder="Chemin sources (optionnel)">
-      <div class="form-actions">
-        <button class="btn-run" (click)="startNewSession()" [disabled]="isStarting || !newTestPath.trim()">
-          {{ isStarting ? '▶ Démarrage…' : '▶ Lancer' }}
-        </button>
-        <button class="btn-cancel" (click)="showNewSession = false">Annuler</button>
-      </div>
-      <div class="start-error" *ngIf="startError">{{ startError }}</div>
-    </div>
+    <button class="btn-new-session" (click)="showNewSession = true">+ Nouvelle session</button>
 
     <div class="session-list">
       <button *ngFor="let s of sessions" class="session-item" [class.active]="s.id === selectedSessionId" (click)="selectSession(s.id)">
@@ -62,7 +50,7 @@
     <div class="empty-state" *ngIf="!selectedSessionId">
       <div class="empty-icon">🧪</div>
       <h2>Sélectionnez ou créez une session</h2>
-      <p>Lancez un pipeline pour analyser et corriger vos tests .NET automatiquement.</p>
+      <p>Importez un fichier C#, collez du code, ou indiquez un chemin projet pour lancer le pipeline IA.</p>
       <button class="btn-run large" (click)="showNewSession = true">+ Nouvelle session</button>
     </div>
 
@@ -81,96 +69,479 @@
             {{ isResuming ? 'Reprise…' : '▶ Reprendre le pipeline' }}
           </button>
         </div>
-      </div>
 
-      <!-- Stats cards -->
-      <div class="stats-grid">
-        <div class="stat-card total" (click)="setFilter('all')" [class.active-filter]="filterStatus === 'all'">
-          <div class="stat-number">{{ testCases.length }}</div><div class="stat-label">Total</div>
-        </div>
-        <div class="stat-card green-card" (click)="setFilter('Green')" [class.active-filter]="filterStatus === 'Green'">
-          <div class="stat-number">{{ countByStatus('Green') }}</div><div class="stat-label">✓ Réussis</div>
-        </div>
-        <div class="stat-card red-card" (click)="setFilter('Red')" [class.active-filter]="filterStatus === 'Red'">
-          <div class="stat-number">{{ countByStatus('Red') }}</div><div class="stat-label">✗ Échoués</div>
-        </div>
-        <div class="stat-card await-card" (click)="setFilter('EnAttenteDecision')" [class.active-filter]="filterStatus === 'EnAttenteDecision'">
-          <div class="stat-number">{{ countByStatus('EnAttenteDecision') }}</div><div class="stat-label">👤 Décision</div>
-        </div>
-        <div class="stat-card pending-card" (click)="setFilter('Pending')" [class.active-filter]="filterStatus === 'Pending'">
-          <div class="stat-number">{{ countByStatus('Pending') }}</div><div class="stat-label">⏳ En attente</div>
-        </div>
-        <div class="stat-card ignored-card" (click)="setFilter('Ignored')" [class.active-filter]="filterStatus === 'Ignored'">
-          <div class="stat-number">{{ countByStatus('Ignored') }}</div><div class="stat-label">— Ignorés</div>
+        <!-- Session en erreur : motif + relance -->
+        <div class="error-bar" *ngIf="isSessionErrored">
+          <div class="error-bar-head">
+            <span class="error-bar-title">⚠️ Cette session a échoué</span>
+            <button class="btn-rerun" (click)="rerunSession()" [disabled]="isRerunning">
+              {{ isRerunning ? 'Relance en cours…' : '↻ Relancer la session' }}
+            </button>
+          </div>
+          <pre class="error-bar-msg" *ngIf="sessionErrorMessage">{{ sessionErrorMessage }}</pre>
+          <span class="error-bar-msg muted" *ngIf="!sessionErrorMessage">
+            Aucun détail enregistré pour cette erreur. Relancez la session pour obtenir le motif précis.
+          </span>
         </div>
       </div>
 
-      <!-- Bulk actions bar -->
-      <div class="bulk-bar" *ngIf="selectedTestIds.size > 0">
-        <span class="bulk-count">{{ selectedTestIds.size }} test(s) sélectionné(s)</span>
-        <button class="btn-action fix-test" (click)="bulkAction('FixTest')">🔧 Corriger le test</button>
-        <button class="btn-action fix-code" (click)="bulkAction('FixCode')">⚙️ Corriger le code</button>
-        <button class="btn-action ignore" (click)="bulkAction('Ignore')">✕ Ignorer</button>
-        <button class="btn-cancel" (click)="selectedTestIds.clear()">Annuler</button>
+      <!-- ── Vue onglets ──────────────────────────────────────── -->
+      <div class="view-tabs">
+        <button class="vtab" [class.active]="activeTab === 'tests'" (click)="switchTab('tests')">
+          🧪 Tests <span class="vtab-count">{{ testCases.length }}</span>
+        </button>
+        <button class="vtab" [class.active]="activeTab === 'code'" (click)="switchTab('code')">
+          📄 Analyse du code
+        </button>
+        <button class="vtab" [class.active]="activeTab === 'pipeline'" (click)="switchTab('pipeline')">
+          🛰️ Pipeline IA <span class="vtab-count" *ngIf="agentLogs.length">{{ agentLogs.length }}</span>
+        </button>
       </div>
 
-      <!-- Tests table -->
-      <div class="table-wrapper" *ngIf="filteredTests.length > 0">
-        <table class="test-table">
-          <thead>
-            <tr>
-              <th class="col-check"><input type="checkbox" [checked]="allSelected" (change)="toggleSelectAll()"></th>
-              <th class="col-name">Test</th>
-              <th class="col-status">Statut</th>
-              <th class="col-action-set">Action</th>
-              <th class="col-retry">Tentatives</th>
-              <th class="col-actions">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let t of filteredTests; trackBy: trackById"
-                [class.selected-row]="selectedTestIds.has(t.id)"
-                [class.has-error]="t.status === 'Red'">
-              <td class="col-check"><input type="checkbox" [checked]="selectedTestIds.has(t.id)" (change)="toggleSelect(t.id)"></td>
-              <td class="col-name">
-                <div class="test-class">{{ t.className }}</div>
-                <div class="test-method">{{ t.methodName }}</div>
-                <div class="error-block" *ngIf="t.errorMessage">
-                  <button class="error-toggle" (click)="toggleError(t.id)">{{ isErrorExpanded(t.id) ? '▲ Masquer' : '▼ Voir l\'erreur' }}</button>
-                  <pre class="error-text" *ngIf="isErrorExpanded(t.id)">{{ t.errorMessage }}</pre>
-                  <div class="error-preview" *ngIf="!isErrorExpanded(t.id)">{{ truncate(t.errorMessage) }}</div>
+      <!-- ══════════════════════ ONGLET TESTS ══════════════════════ -->
+      <ng-container *ngIf="activeTab === 'tests'">
+        <!-- Stats cards -->
+        <div class="stats-grid">
+          <div class="stat-card total" (click)="setFilter('all')" [class.active-filter]="filterStatus === 'all'">
+            <div class="stat-number">{{ testCases.length }}</div><div class="stat-label">Total</div>
+          </div>
+          <div class="stat-card green-card" (click)="setFilter('Green')" [class.active-filter]="filterStatus === 'Green'">
+            <div class="stat-number">{{ countByStatus('Green') }}</div><div class="stat-label">✓ Réussis</div>
+          </div>
+          <div class="stat-card red-card" (click)="setFilter('Red')" [class.active-filter]="filterStatus === 'Red'">
+            <div class="stat-number">{{ countByStatus('Red') }}</div><div class="stat-label">✗ Échoués</div>
+          </div>
+          <div class="stat-card await-card" (click)="setFilter('EnAttenteDecision')" [class.active-filter]="filterStatus === 'EnAttenteDecision'">
+            <div class="stat-number">{{ countByStatus('EnAttenteDecision') }}</div><div class="stat-label">👤 Décision</div>
+          </div>
+          <div class="stat-card pending-card" (click)="setFilter('Pending')" [class.active-filter]="filterStatus === 'Pending'">
+            <div class="stat-number">{{ countByStatus('Pending') }}</div><div class="stat-label">⏳ En attente</div>
+          </div>
+          <div class="stat-card ignored-card" (click)="setFilter('Ignored')" [class.active-filter]="filterStatus === 'Ignored'">
+            <div class="stat-number">{{ countByStatus('Ignored') }}</div><div class="stat-label">— Ignorés</div>
+          </div>
+        </div>
+
+        <!-- Bulk actions bar -->
+        <div class="bulk-bar" *ngIf="selectedTestIds.size > 0">
+          <span class="bulk-count">{{ selectedTestIds.size }} test(s) sélectionné(s)</span>
+          <button class="btn-action fix-test" (click)="bulkAction('FixTest')">🔧 Corriger le test</button>
+          <button class="btn-action fix-code" (click)="bulkAction('FixCode')">⚙️ Corriger le code</button>
+          <button class="btn-action ignore" (click)="bulkAction('Ignore')">✕ Ignorer</button>
+          <button class="btn-cancel" (click)="selectedTestIds.clear()">Annuler</button>
+        </div>
+
+        <!-- Tests table -->
+        <div class="table-wrapper" *ngIf="filteredTests.length > 0">
+          <table class="test-table">
+            <thead>
+              <tr>
+                <th class="col-check"><input type="checkbox" [checked]="allSelected" (change)="toggleSelectAll()"></th>
+                <th class="col-name">Test</th>
+                <th class="col-status">Statut</th>
+                <th class="col-action-set">Action</th>
+                <th class="col-retry">Tentatives</th>
+                <th class="col-actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let t of filteredTests; trackBy: trackById"
+                  [class.selected-row]="selectedTestIds.has(t.id)"
+                  [class.has-error]="t.status === 'Red'">
+                <td class="col-check"><input type="checkbox" [checked]="selectedTestIds.has(t.id)" (change)="toggleSelect(t.id)"></td>
+                <td class="col-name">
+                  <div class="test-class">{{ t.className }}</div>
+                  <div class="test-method">{{ t.methodName }}</div>
+                  <div class="error-block" *ngIf="t.errorMessage">
+                    <button class="error-toggle" (click)="toggleError(t.id)">{{ isErrorExpanded(t.id) ? '▲ Masquer' : '▼ Voir l\'erreur' }}</button>
+                    <pre class="error-text" *ngIf="isErrorExpanded(t.id)">{{ t.errorMessage }}</pre>
+                    <div class="error-preview" *ngIf="!isErrorExpanded(t.id)">{{ truncate(t.errorMessage) }}</div>
+                  </div>
+                  <div class="fix-tag" *ngIf="t.fixApplied">✔ {{ t.fixApplied }}</div>
+                </td>
+                <td class="col-status"><span class="badge" [ngClass]="statusClass(t.status)">{{ statusLabel(t.status) }}</span></td>
+                <td class="col-action-set">
+                  <span class="action-badge action-fix-test" *ngIf="t.action === 'FixTest'">🔧 Test</span>
+                  <span class="action-badge action-fix-code" *ngIf="t.action === 'FixCode'">⚙️ Code</span>
+                  <span class="action-badge action-ignore" *ngIf="t.action === 'Ignore'">✕ Ignoré</span>
+                  <span class="no-action" *ngIf="t.action === 'None'">—</span>
+                </td>
+                <td class="col-retry">
+                  <span class="retry-badge" *ngIf="t.retryCount > 0">{{ t.retryCount }}</span>
+                  <span *ngIf="t.retryCount === 0">—</span>
+                </td>
+                <td class="col-actions">
+                  <div class="action-btns" *ngIf="t.status !== 'Green' && t.status !== 'Ignored'">
+                    <button class="btn-action fix-test sm" (click)="setAction(t.id, 'FixTest')">🔧 Test</button>
+                    <button class="btn-action fix-code sm" (click)="setAction(t.id, 'FixCode')">⚙️ Code</button>
+                    <button class="btn-action ignore sm" (click)="setAction(t.id, 'Ignore')">✕</button>
+                  </div>
+                  <span class="green-ok" *ngIf="t.status === 'Green'">✓</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="no-tests" *ngIf="filteredTests.length === 0 && testCases.length > 0">
+          Aucun test avec le filtre « {{ filterStatus }} ».
+          <button class="link-btn" (click)="setFilter('all')">Voir tout</button>
+        </div>
+        <div class="no-tests" *ngIf="testCases.length === 0">Aucun test découvert pour cette session.</div>
+      </ng-container>
+
+      <!-- ══════════════════════ ONGLET CODE ══════════════════════ -->
+      <ng-container *ngIf="activeTab === 'code'">
+        <div class="code-loading" *ngIf="isLoadingCode">
+          <span class="loading-spinner"></span> Chargement du code…
+        </div>
+
+        <div class="code-unavailable" *ngIf="!isLoadingCode && !sessionCode">
+          Les fichiers de cette session ne sont plus disponibles sur le disque.
+        </div>
+
+        <ng-container *ngIf="!isLoadingCode && sessionCode">
+
+          <!-- ── Quality Gate Bar (style SonarQube) ───────────────────────── -->
+          <div class="quality-gate" [ngClass]="qualityGateClass">
+            <div class="qg-left">
+              <span class="qg-icon">{{ qualityGateLabel === 'PASSED' ? '✔' : qualityGateLabel === 'PARTIAL' ? '▲' : '✖' }}</span>
+              <span class="qg-title">Quality Gate</span>
+              <span class="qg-status-label">{{ qualityGateLabel }}</span>
+            </div>
+            <div class="qg-metrics">
+              <div class="qg-metric">
+                <span class="qg-metric-val green-val">{{ countByStatus('Green') }}</span>
+                <span class="qg-metric-lbl">Tests réussis</span>
+              </div>
+              <div class="qg-sep">|</div>
+              <div class="qg-metric">
+                <span class="qg-metric-val red-val">{{ countByStatus('Red') }}</span>
+                <span class="qg-metric-lbl">Échecs</span>
+              </div>
+              <div class="qg-sep">|</div>
+              <div class="qg-metric">
+                <span class="qg-metric-val">{{ qualityScore }}%</span>
+                <span class="qg-metric-lbl">Couverture</span>
+              </div>
+            </div>
+            <div class="qg-bar-wrap">
+              <div class="qg-bar-fill" [style.width.%]="qualityScore" [ngClass]="qualityGateClass"></div>
+            </div>
+          </div>
+
+          <!-- ── Panneaux code côte à côte ────────────────────────────────── -->
+          <div class="code-view">
+            <!-- Panel : Code source -->
+            <div class="code-panel">
+              <div class="panel-header source-header">
+                <span class="panel-icon">📥</span>
+                <span class="panel-title">Code source</span>
+                <span class="panel-badge src-badge">INPUT</span>
+                <div class="file-tabs" *ngIf="sessionCode.sourceFiles.length > 1">
+                  <button *ngFor="let f of sessionCode.sourceFiles; let i = index"
+                          class="file-tab" [class.active]="selectedSourceIdx === i"
+                          (click)="selectedSourceIdx = i">{{ f.fileName }}</button>
                 </div>
-                <div class="fix-tag" *ngIf="t.fixApplied">✔ {{ t.fixApplied }}</div>
-              </td>
-              <td class="col-status"><span class="badge" [ngClass]="statusClass(t.status)">{{ statusLabel(t.status) }}</span></td>
-              <td class="col-action-set">
-                <span class="action-badge action-fix-test" *ngIf="t.action === 'FixTest'">🔧 Test</span>
-                <span class="action-badge action-fix-code" *ngIf="t.action === 'FixCode'">⚙️ Code</span>
-                <span class="action-badge action-ignore" *ngIf="t.action === 'Ignore'">✕ Ignoré</span>
-                <span class="no-action" *ngIf="t.action === 'None'">—</span>
-              </td>
-              <td class="col-retry">
-                <span class="retry-badge" *ngIf="t.retryCount > 0">{{ t.retryCount }}</span>
-                <span *ngIf="t.retryCount === 0">—</span>
-              </td>
-              <td class="col-actions">
-                <div class="action-btns" *ngIf="t.status !== 'Green' && t.status !== 'Ignored'">
-                  <button class="btn-action fix-test sm" (click)="setAction(t.id, 'FixTest')">🔧 Test</button>
-                  <button class="btn-action fix-code sm" (click)="setAction(t.id, 'FixCode')">⚙️ Code</button>
-                  <button class="btn-action ignore sm" (click)="setAction(t.id, 'Ignore')">✕</button>
-                </div>
-                <span class="green-ok" *ngIf="t.status === 'Green'">✓</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+                <span class="file-name-pill" *ngIf="currentSourceFile">{{ currentSourceFile.fileName }}</span>
+              </div>
+              <div class="code-scroll source-panel" *ngIf="currentSourceFile">
+                <pre class="code-block"><code [innerHTML]="highlight(currentSourceFile.content)"></code></pre>
+              </div>
+              <div class="no-file" *ngIf="!currentSourceFile">Aucun fichier source disponible.</div>
+            </div>
 
-      <div class="no-tests" *ngIf="filteredTests.length === 0 && testCases.length > 0">
-        Aucun test avec le filtre « {{ filterStatus }} ».
-        <button class="link-btn" (click)="setFilter('all')">Voir tout</button>
-      </div>
-      <div class="no-tests" *ngIf="testCases.length === 0">Aucun test découvert pour cette session.</div>
+            <!-- Séparateur Checkmarx-style -->
+            <div class="code-divider">
+              <div class="divider-line"></div>
+              <div class="divider-arrow">→</div>
+              <div class="divider-line"></div>
+            </div>
+
+            <!-- Panel : Tests générés -->
+            <div class="code-panel">
+              <div class="panel-header test-header">
+                <span class="panel-icon">📤</span>
+                <span class="panel-title">Tests générés</span>
+                <span class="panel-badge test-badge">OUTPUT</span>
+                <div class="file-tabs" *ngIf="sessionCode.testFiles.length > 1">
+                  <button *ngFor="let f of sessionCode.testFiles; let i = index"
+                          class="file-tab" [class.active]="selectedTestIdx === i"
+                          (click)="selectedTestIdx = i">{{ f.fileName }}</button>
+                </div>
+                <span class="file-name-pill" *ngIf="currentTestFile">{{ currentTestFile.fileName }}</span>
+              </div>
+              <div class="code-scroll" *ngIf="currentTestFile">
+                <pre class="code-block"><code [innerHTML]="highlightTest(currentTestFile.content)"></code></pre>
+              </div>
+              <div class="no-file" *ngIf="!currentTestFile">Aucun fichier de test disponible.</div>
+            </div>
+          </div>
+
+          <!-- ── Panneau Issues (style Checkmarx) ─────────────────────────── -->
+          <div class="issues-panel" *ngIf="failingTests.length > 0">
+            <div class="issues-header">
+              <span class="issues-icon">⚠</span>
+              <span class="issues-title">Issues détectées</span>
+              <span class="issues-count">{{ failingTests.length }}</span>
+              <span class="issues-subtitle">tests échoués nécessitant une action</span>
+            </div>
+            <div class="issue-list">
+              <div *ngFor="let t of failingTests; let idx = index" class="issue-row">
+                <div class="issue-sev high">HIGH</div>
+                <div class="issue-body">
+                  <div class="issue-top">
+                    <span class="issue-method">{{ t.methodName }}</span>
+                    <span class="issue-class">in {{ t.className }}</span>
+                    <span class="issue-retry" *ngIf="t.retryCount > 0">{{ t.retryCount }} tentative(s)</span>
+                    <button class="issue-toggle" (click)="toggleIssue('t'+t.id)">
+                      {{ isIssueExpanded('t'+t.id) ? '▲' : '▼' }}
+                    </button>
+                  </div>
+                  <div class="issue-msg-preview" *ngIf="t.errorMessage && !isIssueExpanded('t'+t.id)">
+                    {{ truncate(t.errorMessage, 160) }}
+                  </div>
+                  <pre class="issue-msg-full" *ngIf="t.errorMessage && isIssueExpanded('t'+t.id)">{{ t.errorMessage }}</pre>
+                </div>
+                <div class="issue-actions">
+                  <button class="btn-action fix-test sm" (click)="setAction(t.id, 'FixTest')">🔧 Fix Test</button>
+                  <button class="btn-action fix-code sm" (click)="setAction(t.id, 'FixCode')">⚙️ Fix Code</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="issues-panel all-ok" *ngIf="failingTests.length === 0 && testCases.length > 0">
+            <span class="issues-icon">✔</span>
+            <span class="issues-title ok-text">Tous les tests sont au vert — aucune issue détectée.</span>
+          </div>
+
+        </ng-container>
+      </ng-container>
+
+      <!-- ══════════════════════ ONGLET PIPELINE IA ══════════════════════ -->
+      <ng-container *ngIf="activeTab === 'pipeline'">
+        <div class="pipeline-grid">
+
+          <!-- ── Analyse Roslyn ──────────────────────────────────────── -->
+          <div class="pl-card">
+            <div class="pl-card-head">
+              <span class="pl-icon">🔍</span>
+              <span class="pl-title">Analyse statique (Roslyn)</span>
+              <span class="pl-badge analyze">ANALYZER</span>
+            </div>
+            <div class="pl-card-body" *ngIf="analysis as a; else noAnalysis">
+              <div class="meta-row">
+                <span class="meta-key">Classe</span>
+                <span class="meta-val mono accent">{{ a.className || '—' }}</span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-key">Namespace</span>
+                <span class="meta-val mono">{{ a.namespace || '—' }}</span>
+              </div>
+              <div class="meta-row" *ngIf="a.dependencies.length">
+                <span class="meta-key">Dépendances</span>
+                <span class="meta-val deps">
+                  <span class="dep-pill" *ngFor="let d of a.dependencies">{{ d }}</span>
+                </span>
+              </div>
+
+              <div class="methods-block" *ngIf="a.methods.length">
+                <div class="methods-title">Méthodes détectées <span class="m-count">{{ a.methods.length }}</span></div>
+                <table class="methods-table">
+                  <thead>
+                    <tr><th>Méthode</th><th>Type retour</th><th>Paramètres</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr *ngFor="let m of a.methods">
+                      <td class="mono accent">{{ m.name }}</td>
+                      <td class="mono ret">{{ m.returnType }}</td>
+                      <td class="mono dim">{{ formatParams(m.parameters) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="pl-empty small" *ngIf="!a.methods.length">Aucune méthode publique détectée.</div>
+            </div>
+            <ng-template #noAnalysis>
+              <div class="pl-empty">Aucune analyse disponible. Cette session n'a pas été générée via la chaîne d'agents.</div>
+            </ng-template>
+          </div>
+
+          <!-- ── Stratégie de test IA ────────────────────────────────── -->
+          <div class="pl-card">
+            <div class="pl-card-head">
+              <span class="pl-icon">🧭</span>
+              <span class="pl-title">Stratégie de test (IA)</span>
+              <span class="pl-badge decide">DECIDER</span>
+            </div>
+            <div class="pl-card-body">
+              <pre class="strategy-text" *ngIf="testStrategy; else noStrategy">{{ testStrategy }}</pre>
+              <ng-template #noStrategy>
+                <div class="pl-empty">Aucune stratégie générée par l'IA pour cette session.</div>
+              </ng-template>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ── Communication agentique (A2A + dialogue LLM fusionnés) ── -->
+        <div class="pl-card agent-comm-card">
+          <div class="pl-card-head">
+            <span class="pl-icon">🛰️</span>
+            <span class="pl-title">Communication agentique</span>
+            <span class="pl-count" *ngIf="agentActivities.length">{{ agentActivities.length }}</span>
+            <span class="live-dot" *ngIf="isSessionRunning" title="Mise à jour en direct"></span>
+            <div class="convo-tools" *ngIf="agentActivities.length">
+              <button class="convo-tool" (click)="expandAllActivities()" title="Tout déplier">Tout déplier</button>
+              <button class="convo-tool" (click)="collapseAllActivities()" title="Tout replier">Tout replier</button>
+            </div>
+            <button class="pl-refresh" (click)="reloadPipeline()" title="Rafraîchir" aria-label="Rafraîchir la communication agentique">↻</button>
+          </div>
+          <div class="pl-card-body">
+            <div class="pl-loading" *ngIf="(isLoadingLogs || isLoadingConversation) && !agentActivities.length">
+              <span class="loading-spinner"></span> Chargement de la communication agentique…
+            </div>
+
+            <div class="agent-flow" *ngIf="agentActivities.length">
+              <div class="ac-item" *ngFor="let a of agentActivities; trackBy: trackActivity"
+                   [class.run]="a.status === 'running'" [class.err]="a.status === 'error'">
+                <div class="ac-rail">
+                  <div class="ac-marker" [class.ok]="a.status === 'ok'" [class.err]="a.status === 'error'"
+                       [class.run]="a.status === 'running'">{{ a.icon }}</div>
+                </div>
+                <div class="ac-content">
+                  <!-- En-tête cliquable -->
+                  <button class="ac-head" [class.open]="isActivityExpanded(a.index)"
+                          [attr.aria-expanded]="isActivityExpanded(a.index)"
+                          [attr.aria-label]="'Agent ' + a.agent + ', étape ' + a.index"
+                          (click)="toggleActivity(a.index)">
+                    <span class="ac-step">{{ a.index }}</span>
+                    <span class="ac-agent">{{ a.agent }}</span>
+                    <span class="ac-specialty">{{ a.specialty }}</span>
+                    <span class="ac-status" [ngClass]="'st-' + a.status">{{ activityStatusLabel(a) }}</span>
+                    <span class="ac-time">{{ a.startTime }}</span>
+                    <span class="ac-caret">{{ isActivityExpanded(a.index) ? '▾' : '▸' }}</span>
+                  </button>
+
+                  <!-- Ligne de flux toujours visible : avec qui il communique -->
+                  <div class="ac-flowline">
+                    <span class="ac-chip in" *ngIf="a.prevAgent">⬅ reçoit de <b>{{ a.prevAgent }}</b></span>
+                    <span class="ac-chip start" *ngIf="!a.prevAgent">⬅ entrée : code source</span>
+                    <span class="ac-chip out" *ngIf="a.nextAgent">transmet à <b>{{ a.nextAgent }}</b> ➡</span>
+                    <span class="ac-chip end" *ngIf="!a.nextAgent && a.status !== 'running'">fin de chaîne ✓</span>
+                    <span class="ac-chip llm" *ngIf="a.dialogues.length">💬 {{ a.dialogues.length }} appel(s) LLM</span>
+                    <span class="ac-chip cmd" *ngIf="a.commands.length">🖥️ {{ a.commands.length }} commande(s)</span>
+                    <span class="ac-chip loop" *ngIf="a.occurrenceTotal && a.occurrenceTotal > 1">🔁 passage {{ a.occurrence }}/{{ a.occurrenceTotal }}</span>
+                    <span class="ac-chip det" *ngIf="!a.dialogues.length && !a.commands.length">⚙️ action déterministe</span>
+                  </div>
+
+                  <!-- Détail déplié -->
+                  <div class="ac-body" *ngIf="isActivityExpanded(a.index)">
+
+                    <!-- Pourquoi plusieurs appels LLM / la boucle derrière -->
+                    <div class="ac-reason" *ngIf="loopExplanation(a)">
+                      <span class="ac-reason-ic">🔁</span>
+                      <span class="ac-reason-tx">{{ loopExplanation(a) }}</span>
+                    </div>
+
+                    <!-- Spécialité / rôle -->
+                    <div class="ac-section">
+                      <span class="ac-section-label">🎯 Spécialité &amp; rôle</span>
+                      <p class="ac-does">{{ a.does }}</p>
+                    </div>
+
+                    <!-- Cycle de vie A2A + relais -->
+                    <div class="ac-section">
+                      <span class="ac-section-label">🛰️ Communication inter-agents (A2A)</span>
+                      <ul class="ac-events">
+                        <li class="ac-evt flow in" *ngIf="a.prevAgent">⬅ Reçoit le relais de <b>{{ a.prevAgent }}</b></li>
+                        <li class="ac-evt" *ngFor="let e of a.events" [class.err]="e.isError">
+                          <span class="ac-evt-time">{{ e.time }}</span>
+                          <span class="ac-evt-text">{{ e.summary }}</span>
+                        </li>
+                        <li class="ac-evt flow out" *ngIf="a.nextAgent">➡ Transmet le relais à <b>{{ a.nextAgent }}</b></li>
+                      </ul>
+                    </div>
+
+                    <!-- Commande exécutée + résultat (TestRunner & agents déterministes) -->
+                    <ng-container *ngIf="a.commands.length">
+                      <div class="ac-section" *ngFor="let c of a.commands">
+                        <span class="ac-section-label">🖥️ Commande exécutée &amp; résultat</span>
+                        <div class="convo-msg" *ngIf="c.command">
+                          <div class="convo-head">
+                            <span class="convo-role role-cmd">⌨️ Commande lancée</span>
+                            <button class="copy-btn" type="button" (click)="copyText(c.command, $event)" aria-label="Copier la commande">📋 Copier</button>
+                          </div>
+                          <pre class="convo-content cmd">{{ c.command }}</pre>
+                        </div>
+                        <div class="convo-msg" *ngIf="c.output">
+                          <div class="convo-head">
+                            <span class="convo-role role-result">📤 Résultat de la commande</span>
+                            <button class="copy-btn" type="button" (click)="copyText(c.output, $event)" aria-label="Copier le résultat">📋 Copier</button>
+                          </div>
+                          <pre class="convo-content">{{ c.output }}</pre>
+                        </div>
+                      </div>
+                    </ng-container>
+
+                    <!-- Dialogue LLM : spécialité système, requête + contexte, réponse -->
+                    <ng-container *ngIf="a.dialogues.length; else noLlm">
+                      <div class="ac-section" *ngFor="let t of a.dialogues; let i = index">
+                        <span class="ac-section-label">💬 Échange LLM<ng-container *ngIf="a.dialogues.length > 1"> n°{{ i + 1 }} / {{ a.dialogues.length }}</ng-container></span>
+                        <div class="convo-reason" *ngIf="llmReason(t)">
+                          <span class="convo-reason-ic">🎯</span>
+                          <span class="convo-reason-tx">{{ llmReason(t) }}</span>
+                        </div>
+                        <div class="convo-msg" *ngIf="t.system">
+                          <div class="convo-head">
+                            <span class="convo-role role-system">⚙️ Spécialité / message système</span>
+                            <button class="copy-btn" type="button" (click)="copyText(t.system, $event)" aria-label="Copier">📋 Copier</button>
+                          </div>
+                          <pre class="convo-content">{{ t.system }}</pre>
+                        </div>
+                        <div class="convo-msg" *ngIf="t.prompt">
+                          <div class="convo-head">
+                            <span class="convo-role role-prompt">📨 Requête envoyée (données chargées + contexte)</span>
+                            <button class="copy-btn" type="button" (click)="copyText(t.prompt, $event)" aria-label="Copier">📋 Copier</button>
+                          </div>
+                          <pre class="convo-content">{{ t.prompt }}</pre>
+                        </div>
+                        <div class="convo-msg" *ngIf="t.response">
+                          <div class="convo-head">
+                            <span class="convo-role role-response">🤖 Réponse reçue</span>
+                            <button class="copy-btn" type="button" (click)="copyText(t.response, $event)" aria-label="Copier">📋 Copier</button>
+                          </div>
+                          <pre class="convo-content">{{ t.response }}</pre>
+                        </div>
+                      </div>
+                    </ng-container>
+                    <ng-template #noLlm>
+                      <div class="ac-section" *ngIf="!a.commands.length">
+                        <span class="ac-section-label">⚙️ Traitement</span>
+                        <p class="ac-does dim">Agent déterministe : aucune requête LLM. L'action est réalisée directement sur le code, les fichiers ou les résultats de test.</p>
+                      </div>
+                    </ng-template>
+
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="pl-empty" *ngIf="!isLoadingLogs && !isLoadingConversation && !agentActivities.length">
+              Aucune communication d'agent enregistrée pour cette session.
+            </div>
+          </div>
+        </div>
+      </ng-container>
+
     </ng-container>
   </main>
 </div>
+
+<!-- ── Modal : Nouvelle session ─────────────────────────────────────────────── -->
+<app-new-session-modal
+  *ngIf="showNewSession"
+  (sessionCreated)="onSessionCreated($event)"
+  (cancelled)="onModalCancelled()">
+</app-new-session-modal>

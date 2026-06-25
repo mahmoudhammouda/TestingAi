@@ -52,6 +52,14 @@ namespace TestingAi.Agents.Domain.Impl.Services
             }
 
             _logger.LogInformation("[Découverte] {Count} tests découverts.", state.TestCases.Count);
+
+            // Trace de l'action déterministe et de son résultat pour la « Communication agentique ».
+            var testList = string.Join("\n", state.TestCases.Select(t => $"  • {t.ClassName}.{t.MethodName}"));
+            await _db.LogCommunicationAsync(
+                state.SessionId, Name,
+                $"Découverte : {state.TestCases.Count} test(s)",
+                $"Analyse statique du projet de tests (scan récursif des fichiers *.cs)\nRépertoire : {state.TestProjectPath}",
+                AgentDiagnostics.Truncate($"{csFiles.Count} fichier(s) C# analysé(s) • {state.TestCases.Count} test(s) découvert(s) :\n{testList}"));
         }
 
         private static bool NotBuildArtifact(string f) =>
