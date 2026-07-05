@@ -418,27 +418,72 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   // ── Artefacts de génération (onglet Pipeline) ───────────────────────────────
 
+  private mapMetadata(m: any): CodeMetadata {
+    return {
+      className: m?.ClassName ?? m?.className ?? '',
+      namespace: m?.Namespace ?? m?.namespace ?? '',
+      dependencies: m?.Dependencies ?? m?.dependencies ?? [],
+      methods: (m?.Methods ?? m?.methods ?? []).map((x: any): MethodMetadata => ({
+        name: x.Name ?? x.name ?? '',
+        returnType: x.ReturnType ?? x.returnType ?? '',
+        parameters: (x.Parameters ?? x.parameters ?? []).map((p: any): ParameterMetadata => ({
+          name: p.Name ?? p.name ?? '',
+          type: p.Type ?? p.type ?? ''
+        }))
+      }))
+    };
+  }
+
+  // Métadonnées d'analyse mono-fichier. Renvoie null si la session est multi-fichiers
+  // (les métadonnées sont alors un tableau — voir analysisPerFile).
   get analysis(): CodeMetadata | null {
     const raw = this.selectedSession?.metadata;
     if (!raw) return null;
     try {
       const m: any = JSON.parse(raw);
-      return {
-        className: m.ClassName ?? m.className ?? '',
-        namespace: m.Namespace ?? m.namespace ?? '',
-        dependencies: m.Dependencies ?? m.dependencies ?? [],
-        methods: (m.Methods ?? m.methods ?? []).map((x: any): MethodMetadata => ({
-          name: x.Name ?? x.name ?? '',
-          returnType: x.ReturnType ?? x.returnType ?? '',
-          parameters: (x.Parameters ?? x.parameters ?? []).map((p: any): ParameterMetadata => ({
-            name: p.Name ?? p.name ?? '',
-            type: p.Type ?? p.type ?? ''
-          }))
-        }))
-      };
+      if (Array.isArray(m)) return null;
+      return this.mapMetadata(m);
     } catch {
       return null;
     }
+  }
+
+  // Analyse par fichier (import de dossier). Vide pour une session mono-fichier.
+  get analysisPerFile(): { file: string; metadata: CodeMetadata | null; error: string }[] {
+    const raw = this.selectedSession?.metadata;
+    if (!raw) return [];
+    try {
+      const m: any = JSON.parse(raw);
+      if (!Array.isArray(m)) return [];
+      return m.map((e: any) => ({
+        file: e.File ?? e.file ?? '',
+        error: e.Error ?? e.error ?? '',
+        metadata: (e.Metadata ?? e.metadata) ? this.mapMetadata(e.Metadata ?? e.metadata) : null
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  // Progression d'une génération multi-fichiers ; null pour une session mono-fichier.
+  get folderProgress(): { total: number; done: number; current: string } | null {
+    const raw = this.selectedSession?.globalState;
+    if (!raw) return null;
+    try {
+      const g: any = JSON.parse(raw);
+      const total = g.FilesTotal ?? g.filesTotal ?? 0;
+      if (!total || total <= 1) return null;
+      return { total, done: g.FilesDone ?? g.filesDone ?? 0, current: g.CurrentFile ?? g.currentFile ?? '' };
+    } catch {
+      return null;
+    }
+  }
+
+  // Nom de fichier seul à partir d'un chemin (séparateurs / ou \).
+  baseName(p: string | undefined): string {
+    if (!p) return '';
+    const s = p.replace(/\\/g, '/');
+    return s.substring(s.lastIndexOf('/') + 1);
   }
 
   get testStrategy(): string { return this.selectedSession?.testStrategy ?? ''; }

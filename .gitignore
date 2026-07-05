@@ -475,3 +475,7 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+# TestingAi — répertoire de travail persistant des sessions + base SQLite locale (générés au runtime)
+Data/Sessions/
+Data/*.db

@@ -98,6 +98,187 @@ namespace TestingAi.Agents.Domain.Impl.Services
             }
         }
 
+        // Exécute le pipeline pour une session DÉJÀ créée (import de dossier), en éventail
+        // sur plusieurs fichiers source : phase de génération répétée par fichier, puis une
+        // seule passe découverte → exécution → décision → correction sur l'ensemble des tests.
+        public async Task<AgentState> RunPipelineForSessionAsync(
+            int sessionId, string testProjectPath, string sourceProjectPath, IReadOnlyList<string> sourceFiles)
+        {
+            _logger.LogInformation(
+                "[Orchestrateur] Démarrage du pipeline multi-fichiers ({N} fichier(s)) pour la session {Id}.",
+                sourceFiles.Count, sessionId);
+
+            var gate = LockFor(testProjectPath);
+            await gate.WaitAsync();
+            try
+            {
+                var settings = await _db.GetSettingsAsync();
+                var state = new AgentState
+                {
+                    SessionId = sessionId,
+                    TestProjectPath = testProjectPath,
+                    SourceProjectPath = sourceProjectPath,
+                    TargetProjectPath = testProjectPath,
+                    Settings = settings,
+                    PipelineStatus = "En_Cours",
+                    FilesTotal = sourceFiles.Count
+                };
+
+                await ExecuteMultiFilePipelineAsync(state, sourceFiles);
+                return state;
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+
+        // Corps du pipeline multi-fichiers. Chaque fichier passe par la phase de génération
+        // de façon ISOLÉE (état de génération réinitialisé) afin d'éviter toute fuite d'un
+        // fichier à l'autre. Un échec de génération est enregistré puis on poursuit avec les
+        // fichiers suivants (le fichier de test défaillant est retiré du disque pour ne pas
+        // casser le build — le Verifier compile le projet de tests ENTIER). Enfin, une seule
+        // passe de validation/correction couvre l'ensemble des tests générés.
+        private async Task ExecuteMultiFilePipelineAsync(AgentState state, IReadOnlyList<string> sourceFiles)
+        {
+            try
+            {
+                var perFileArtifacts = new List<object>();
+                var strategyParts = new List<string>();
+                var failedFiles = new List<string>();
+                int total = sourceFiles.Count;
+
+                for (int i = 0; i < total; i++)
+                {
+                    var file = sourceFiles[i];
+                    var fileName = Path.GetFileName(file);
+
+                    // Progression visible via le sondage (GlobalState) : « Fichier i+1/total ».
+                    state.FilesDone = i;
+                    state.CurrentFileName = fileName;
+                    await UpdateProgressAsync(state);
+                    await _db.LogCommunicationAsync(state.SessionId, "Orchestrateur",
+                        $"▶ Génération du fichier {i + 1}/{total} : {fileName}");
+
+                    // Isolation : repart d'un état de génération propre pour ce fichier.
+                    state.CurrentFilePath = string.Empty;
+                    state.Metadata = null;
+                    state.TestStrategy = string.Empty;
+                    state.GeneratedTestCode = string.Empty;
+                    state.ValidationErrors = new List<string>();
+
+                    try
+                    {
+                        await RunGenerationPhaseAsync(state, file);
+                        perFileArtifacts.Add(new
+                        {
+                            File = fileName,
+                            ClassName = state.Metadata?.ClassName ?? string.Empty,
+                            Metadata = state.Metadata,
+                            Strategy = state.TestStrategy ?? string.Empty
+                        });
+                        strategyParts.Add(
+                            $"### {fileName}\n" +
+                            (string.IsNullOrWhiteSpace(state.TestStrategy) ? "(aucune stratégie)" : state.TestStrategy));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "[Orchestrateur] Génération en échec pour {File} — poursuite.", fileName);
+                        failedFiles.Add(fileName);
+                        RemoveGeneratedTestFile(state);
+                        await _db.LogCommunicationAsync(state.SessionId, "Orchestrateur",
+                            $"Erreur de génération pour {fileName} : {ex.Message}");
+                        perFileArtifacts.Add(new { File = fileName, Error = ex.Message });
+                    }
+                }
+
+                state.FilesDone = total;
+                state.CurrentFileName = string.Empty;
+                await UpdateProgressAsync(state);
+
+                // Persiste les artefacts de génération par fichier (tableau JSON) pour l'affichage.
+                try
+                {
+                    await _db.UpdateSessionGenerationAsync(
+                        state.SessionId,
+                        JsonConvert.SerializeObject(perFileArtifacts),
+                        string.Join("\n\n", strategyParts));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[Orchestrateur] Persistance des artefacts multi-fichiers impossible.");
+                }
+
+                // ── Passe unique de validation/correction sur l'ensemble des tests ──
+                await RunAgentAsync(_discovery, state);
+
+                if (state.TestCases.Count == 0)
+                {
+                    _logger.LogWarning("[Orchestrateur] Aucun test découvert (multi-fichiers).");
+                    state.PipelineStatus = failedFiles.Count > 0 ? "EchecPartiel" : "Terminé";
+                    state.IsFinished = true;
+                    await SaveSessionState(state, state.PipelineStatus);
+                    return;
+                }
+
+                await RunAgentAsync(_runner, state);
+
+                int redCount = state.TestCases.Count(t => t.Status == TestStatus.Red);
+                if (redCount == 0)
+                {
+                    state.PipelineStatus = failedFiles.Count > 0 ? "EchecPartiel" : "Terminé";
+                    state.IsFinished = true;
+                    await SaveSessionState(state, state.PipelineStatus);
+                    return;
+                }
+
+                await RunAgentAsync(_decision, state);
+
+                if (state.Settings.HumanInterventionEnabled && state.PipelineStatus == "EnAttenteDecision")
+                {
+                    _logger.LogInformation("[Orchestrateur] Pipeline multi-fichiers suspendu — décisions humaines.");
+                    await SaveSessionState(state, "EnAttenteDecision");
+                    return;
+                }
+
+                await RunFixAndVerifyLoopAsync(state);
+
+                // Des fichiers ont échoué à la génération → succès PARTIEL même si tous les
+                // tests générés sont verts.
+                if (failedFiles.Count > 0 && state.PipelineStatus == "Terminé")
+                {
+                    state.PipelineStatus = "EchecPartiel";
+                    await SaveSessionState(state, "EchecPartiel");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Orchestrateur] Pipeline multi-fichiers en échec — session {Id} marquée Erreur.", state.SessionId);
+                state.IsFinished = true;
+                state.PipelineStatus = "Erreur";
+                state.ErrorMessage = ex.Message;
+                try { await SaveSessionState(state, "Erreur"); } catch { /* persistance best-effort */ }
+                throw;
+            }
+        }
+
+        // Retire du projet de tests le fichier généré pour le fichier source courant (le cas
+        // échéant), identifié par le nom de classe analysé — best-effort.
+        private void RemoveGeneratedTestFile(AgentState state)
+        {
+            var className = state.Metadata?.ClassName;
+            if (string.IsNullOrWhiteSpace(className)) return;
+            try
+            {
+                var path = Path.Combine(state.TargetProjectPath, $"{className}Tests.cs");
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[Orchestrateur] Suppression du fichier de test défaillant impossible.");
+            }
+        }
+
         // Relance complète d'une session existante (par ex. après une erreur) :
         // repart d'un état propre puis ré-exécute toute la chaîne — génération comprise —
         // en réutilisant le MÊME identifiant de session.
@@ -112,19 +293,23 @@ namespace TestingAi.Agents.Domain.Impl.Services
             await gate.WaitAsync();
             try
             {
-                // Retrouve le fichier source à régénérer (premier .cs hors bin/obj).
-                string? sourceFile = null;
+                // Retrouve TOUS les fichiers source à régénérer (hors bin/obj) — indispensable
+                // pour relancer une session issue d'un import de dossier (multi-fichiers), et
+                // non plus seulement le premier .cs rencontré.
+                var sourceFiles = new List<string>();
                 if (Directory.Exists(session.SourceProject))
                 {
                     var sep = Path.DirectorySeparatorChar;
-                    sourceFile = Directory
+                    sourceFiles = Directory
                         .EnumerateFiles(session.SourceProject, "*.cs", SearchOption.AllDirectories)
-                        .FirstOrDefault(f => !f.Contains($"{sep}bin{sep}") && !f.Contains($"{sep}obj{sep}"));
+                        .Where(f => !f.Contains($"{sep}bin{sep}") && !f.Contains($"{sep}obj{sep}"))
+                        .OrderBy(f => f, StringComparer.Ordinal)
+                        .ToList();
                 }
 
-                if (string.IsNullOrEmpty(sourceFile))
+                if (sourceFiles.Count == 0)
                     throw new Exception(
-                        "Code source introuvable : le dossier temporaire de la session a probablement été nettoyé. " +
+                        "Code source introuvable : le dossier de travail de la session a probablement été supprimé. " +
                         "Créez une nouvelle session à partir du code.");
 
                 // Repart d'un état propre (supprime tests/timeline/mémoire de la tentative précédente).
@@ -138,10 +323,14 @@ namespace TestingAi.Agents.Domain.Impl.Services
                     SourceProjectPath = session.SourceProject,
                     TargetProjectPath = session.TargetProject,
                     Settings = settings,
-                    PipelineStatus = "En_Cours"
+                    PipelineStatus = "En_Cours",
+                    FilesTotal = sourceFiles.Count
                 };
 
-                await ExecuteFullPipelineAsync(state, sourceFile);
+                if (sourceFiles.Count == 1)
+                    await ExecuteFullPipelineAsync(state, sourceFiles[0]);
+                else
+                    await ExecuteMultiFilePipelineAsync(state, sourceFiles);
                 return state;
             }
             finally
@@ -516,18 +705,50 @@ namespace TestingAi.Agents.Domain.Impl.Services
             }
         }
 
+        // Construit l'instantané GlobalState (compteurs de tests + progression multi-fichiers).
+        private object BuildStatePayload(AgentState state) => new
+        {
+            Total = state.TestCases.Count,
+            Green = state.TestCases.Count(t => t.Status == TestStatus.Green),
+            Red = state.TestCases.Count(t => t.Status == TestStatus.Red),
+            Ignored = state.TestCases.Count(t => t.Status == TestStatus.Ignored),
+            AwaitingDecision = state.TestCases.Count(t => t.Status == TestStatus.EnAttenteDecision),
+            Error = state.ErrorMessage ?? string.Empty,
+            FilesTotal = state.FilesTotal,
+            FilesDone = state.FilesDone,
+            CurrentFile = state.CurrentFileName ?? string.Empty
+        };
+
+        // Met à jour uniquement l'instantané GlobalState (progression) en conservant le statut
+        // « En_Cours » — utilisé pendant la boucle multi-fichiers pour le suivi en direct.
+        private async Task UpdateProgressAsync(AgentState state)
+        {
+            var json = JsonConvert.SerializeObject(BuildStatePayload(state));
+            await _db.UpdateSessionStateAsync(state.SessionId, json, "En_Cours");
+        }
+
         private async Task SaveSessionState(AgentState state, string? status = null)
         {
-            var json = JsonConvert.SerializeObject(new
-            {
-                Total = state.TestCases.Count,
-                Green = state.TestCases.Count(t => t.Status == TestStatus.Green),
-                Red = state.TestCases.Count(t => t.Status == TestStatus.Red),
-                Ignored = state.TestCases.Count(t => t.Status == TestStatus.Ignored),
-                AwaitingDecision = state.TestCases.Count(t => t.Status == TestStatus.EnAttenteDecision),
-                Error = state.ErrorMessage ?? string.Empty
-            });
+            var json = JsonConvert.SerializeObject(BuildStatePayload(state));
             await _db.UpdateSessionStateAsync(state.SessionId, json, status ?? state.PipelineStatus);
+            await PersistCodeSnapshotAsync(state);
+        }
+
+        // Persiste un instantané du code (source + tests) tant que le dossier de travail
+        // existe encore, afin que l'onglet « Code » reste consultable même s'il venait à
+        // disparaître (filet de sécurité). Best-effort : n'interrompt jamais le pipeline.
+        private async Task PersistCodeSnapshotAsync(AgentState state)
+        {
+            try
+            {
+                var (codeJson, hasAny) = CodeSnapshotHelper.CaptureJson(state.SourceProjectPath, state.TargetProjectPath);
+                if (hasAny)
+                    await _db.UpdateSessionCodeAsync(state.SessionId, codeJson);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[Orchestrateur] Instantané du code non persisté.");
+            }
         }
     }
 }

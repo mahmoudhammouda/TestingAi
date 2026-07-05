@@ -22,5 +22,11 @@ namespace TestingAi.Agents.Domain.Impl.Models
 
         // Motif d'échec du pipeline (renseigné lorsque la session passe en "Erreur").
         public string ErrorMessage { get; set; } = string.Empty;
+
+        // Progression multi-fichiers (import de dossier). Restent à 0 / vide pour les
+        // sessions mono-fichier (from-code, chemin) — sans impact sur leur affichage.
+        public int FilesTotal { get; set; }
+        public int FilesDone { get; set; }
+        public string CurrentFileName { get; set; } = string.Empty;
     }
 }

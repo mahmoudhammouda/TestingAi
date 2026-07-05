@@ -55,6 +55,17 @@ export interface StartSessionFromCodeRequest {
   fileName?: string;
 }
 
+export interface FolderFile {
+  relativePath: string;
+  content: string;
+}
+
+export interface StartSessionFromFolderRequest {
+  files: FolderFile[];
+  // Sous-ensemble de chemins .cs à couvrir ; vide/absent → tous les .cs.
+  generateFor?: string[];
+}
+
 export interface CodeFile {
   fileName: string;
   content: string;

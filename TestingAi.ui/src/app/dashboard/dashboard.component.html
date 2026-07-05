@@ -63,6 +63,17 @@
           <span class="running-dot" *ngIf="isSessionRunning"></span>
         </div>
         <div class="session-path">{{ selectedSession.targetProject }}</div>
+
+        <!-- Progression d'une génération multi-fichiers (import de dossier) -->
+        <div class="folder-progress" *ngIf="isSessionRunning && folderProgress as fp">
+          <div class="fp-label">
+            <span>⏳ Génération multi-fichiers</span>
+            <span class="fp-count">{{ fp.done }}/{{ fp.total }}</span>
+          </div>
+          <div class="fp-bar"><div class="fp-fill" [style.width.%]="fp.total ? (fp.done / fp.total) * 100 : 0"></div></div>
+          <div class="fp-current" *ngIf="fp.current">Fichier en cours : <span class="mono">{{ fp.current }}</span></div>
+        </div>
+
         <div class="resume-bar" *ngIf="isSessionAwaitingDecision">
           <span class="resume-msg">👤 Des tests attendent votre décision. Définissez les actions ci-dessous, puis cliquez sur Reprendre.</span>
           <button class="btn-resume" (click)="resumeSession()" [disabled]="isResuming">
@@ -138,6 +149,7 @@
               <tr>
                 <th class="col-check"><input type="checkbox" [checked]="allSelected" (change)="toggleSelectAll()"></th>
                 <th class="col-name">Test</th>
+                <th class="col-src">Fichier source</th>
                 <th class="col-status">Statut</th>
                 <th class="col-action-set">Action</th>
                 <th class="col-retry">Tentatives</th>
@@ -159,6 +171,7 @@
                   </div>
                   <div class="fix-tag" *ngIf="t.fixApplied">✔ {{ t.fixApplied }}</div>
                 </td>
+                <td class="col-src mono" [title]="t.sourceFilePath">{{ baseName(t.sourceFilePath) || '—' }}</td>
                 <td class="col-status"><span class="badge" [ngClass]="statusClass(t.status)">{{ statusLabel(t.status) }}</span></td>
                 <td class="col-action-set">
                   <span class="action-badge action-fix-test" *ngIf="t.action === 'FixTest'">🔧 Test</span>
@@ -330,41 +343,69 @@
               <span class="pl-title">Analyse statique (Roslyn)</span>
               <span class="pl-badge analyze">ANALYZER</span>
             </div>
-            <div class="pl-card-body" *ngIf="analysis as a; else noAnalysis">
-              <div class="meta-row">
-                <span class="meta-key">Classe</span>
-                <span class="meta-val mono accent">{{ a.className || '—' }}</span>
+            <!-- Multi-fichiers (import de dossier) : une entrée compacte par fichier analysé -->
+            <div class="pl-card-body" *ngIf="analysisPerFile.length; else singleAnalysis">
+              <div class="analysis-file" *ngFor="let af of analysisPerFile">
+                <div class="analysis-file-head">
+                  <span class="mono accent">{{ af.file }}</span>
+                  <span class="pl-badge fail" *ngIf="af.error">ÉCHEC</span>
+                </div>
+                <div class="pl-empty small" *ngIf="af.error">{{ af.error }}</div>
+                <ng-container *ngIf="af.metadata as a">
+                  <div class="meta-row">
+                    <span class="meta-key">Classe</span>
+                    <span class="meta-val mono accent">{{ a.className || '—' }}</span>
+                  </div>
+                  <div class="meta-row" *ngIf="a.namespace">
+                    <span class="meta-key">Namespace</span>
+                    <span class="meta-val mono">{{ a.namespace }}</span>
+                  </div>
+                  <div class="meta-row" *ngIf="a.methods.length">
+                    <span class="meta-key">Méthodes</span>
+                    <span class="meta-val">{{ a.methods.length }}</span>
+                  </div>
+                </ng-container>
               </div>
-              <div class="meta-row">
-                <span class="meta-key">Namespace</span>
-                <span class="meta-val mono">{{ a.namespace || '—' }}</span>
-              </div>
-              <div class="meta-row" *ngIf="a.dependencies.length">
-                <span class="meta-key">Dépendances</span>
-                <span class="meta-val deps">
-                  <span class="dep-pill" *ngFor="let d of a.dependencies">{{ d }}</span>
-                </span>
-              </div>
-
-              <div class="methods-block" *ngIf="a.methods.length">
-                <div class="methods-title">Méthodes détectées <span class="m-count">{{ a.methods.length }}</span></div>
-                <table class="methods-table">
-                  <thead>
-                    <tr><th>Méthode</th><th>Type retour</th><th>Paramètres</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr *ngFor="let m of a.methods">
-                      <td class="mono accent">{{ m.name }}</td>
-                      <td class="mono ret">{{ m.returnType }}</td>
-                      <td class="mono dim">{{ formatParams(m.parameters) }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <div class="pl-empty small" *ngIf="!a.methods.length">Aucune méthode publique détectée.</div>
             </div>
-            <ng-template #noAnalysis>
-              <div class="pl-empty">Aucune analyse disponible. Cette session n'a pas été générée via la chaîne d'agents.</div>
+
+            <!-- Mono-fichier : vue détaillée d'origine -->
+            <ng-template #singleAnalysis>
+              <div class="pl-card-body" *ngIf="analysis as a; else noAnalysis">
+                <div class="meta-row">
+                  <span class="meta-key">Classe</span>
+                  <span class="meta-val mono accent">{{ a.className || '—' }}</span>
+                </div>
+                <div class="meta-row">
+                  <span class="meta-key">Namespace</span>
+                  <span class="meta-val mono">{{ a.namespace || '—' }}</span>
+                </div>
+                <div class="meta-row" *ngIf="a.dependencies.length">
+                  <span class="meta-key">Dépendances</span>
+                  <span class="meta-val deps">
+                    <span class="dep-pill" *ngFor="let d of a.dependencies">{{ d }}</span>
+                  </span>
+                </div>
+
+                <div class="methods-block" *ngIf="a.methods.length">
+                  <div class="methods-title">Méthodes détectées <span class="m-count">{{ a.methods.length }}</span></div>
+                  <table class="methods-table">
+                    <thead>
+                      <tr><th>Méthode</th><th>Type retour</th><th>Paramètres</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr *ngFor="let m of a.methods">
+                        <td class="mono accent">{{ m.name }}</td>
+                        <td class="mono ret">{{ m.returnType }}</td>
+                        <td class="mono dim">{{ formatParams(m.parameters) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="pl-empty small" *ngIf="!a.methods.length">Aucune méthode publique détectée.</div>
+              </div>
+              <ng-template #noAnalysis>
+                <div class="pl-empty">Aucune analyse disponible. Cette session n'a pas été générée via la chaîne d'agents.</div>
+              </ng-template>
             </ng-template>
           </div>
 

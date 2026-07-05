@@ -14,6 +14,7 @@ namespace TestingAi.Agents.Domain.Intf.Services
         Task<IEnumerable<TestingSession>> GetAllSessionsAsync();
         Task UpdateSessionStateAsync(int sessionId, string globalState, string status);
         Task UpdateSessionGenerationAsync(int sessionId, string metadata, string testStrategy);
+        Task UpdateSessionCodeAsync(int sessionId, string codeSnapshot);
         Task ResetSessionForRerunAsync(int sessionId);
 
         // TestCases

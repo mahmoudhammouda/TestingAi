@@ -12,6 +12,7 @@ namespace TestingAi.Agents.Domain.Impl.Models
         public string CreatedAt { get; set; } = string.Empty;
         public string Metadata { get; set; } = string.Empty;
         public string TestStrategy { get; set; } = string.Empty;
+        public string CodeSnapshot { get; set; } = string.Empty;
     }
 
     public class AgentA2ACommunication

@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { Session, TestCase, PipelineSettings, StartSessionRequest, StartSessionFromCodeRequest, SessionCode, AgentLog, AgentMessage } from '../models/test-models';
+import { Session, TestCase, PipelineSettings, StartSessionRequest, StartSessionFromCodeRequest, StartSessionFromFolderRequest, SessionCode, AgentLog, AgentMessage } from '../models/test-models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -13,6 +13,7 @@ export class ApiService {
   getSession(id: number): Observable<Session> { return this.http.get<Session>(`${this.base}/api/sessions/${id}`); }
   startSession(req: StartSessionRequest): Observable<any> { return this.http.post(`${this.base}/api/sessions`, req); }
   startSessionFromCode(req: StartSessionFromCodeRequest): Observable<any> { return this.http.post(`${this.base}/api/sessions/from-code`, req); }
+  startSessionFromFolder(req: StartSessionFromFolderRequest): Observable<any> { return this.http.post(`${this.base}/api/sessions/from-folder`, req); }
   resumeSession(id: number): Observable<any> { return this.http.post(`${this.base}/api/sessions/${id}/resume`, {}); }
   rerunSession(id: number): Observable<any> { return this.http.post(`${this.base}/api/sessions/${id}/rerun`, {}); }
   getTestCases(sessionId: number): Observable<TestCase[]> { return this.http.get<TestCase[]>(`${this.base}/api/sessions/${sessionId}/tests`); }

@@ -81,6 +81,9 @@ namespace TestingAi.Agents.Infrastructure.Impl
             // ── Migrations légères (colonnes ajoutées après coup) ────────────────
             await EnsureColumnAsync(db, "TestingSessions", "Metadata", "TEXT NOT NULL DEFAULT ''");
             await EnsureColumnAsync(db, "TestingSessions", "TestStrategy", "TEXT NOT NULL DEFAULT ''");
+            // Instantané du code (source + tests) sérialisé en JSON : permet d'afficher l'onglet
+            // « Code » même après le nettoyage des dossiers temporaires de la session (/tmp purgé).
+            await EnsureColumnAsync(db, "TestingSessions", "CodeSnapshot", "TEXT NOT NULL DEFAULT ''");
             // Commande lancée + résultat (agents déterministes / TestRunner) pour la timeline A2A.
             await EnsureColumnAsync(db, "AgentA2ACommunication", "CommandText", "TEXT");
             await EnsureColumnAsync(db, "AgentA2ACommunication", "CommandOutput", "TEXT");
@@ -135,6 +138,14 @@ namespace TestingAi.Agents.Infrastructure.Impl
                 new { sessionId, metadata, testStrategy });
         }
 
+        public async Task UpdateSessionCodeAsync(int sessionId, string codeSnapshot)
+        {
+            using var db = GetConnection();
+            await db.ExecuteAsync(
+                "UPDATE TestingSessions SET CodeSnapshot = @codeSnapshot WHERE Id = @sessionId",
+                new { sessionId, codeSnapshot });
+        }
+
         // Réinitialise une session pour une relance complète : supprime les tests,
         // la timeline A2A et la mémoire des agents, et remet la session à l'état initial.
         public async Task ResetSessionForRerunAsync(int sessionId)
@@ -145,7 +156,7 @@ namespace TestingAi.Agents.Infrastructure.Impl
                 DELETE FROM AgentA2ACommunication WHERE SessionId = @sessionId;
                 DELETE FROM AgentPrivateMemory WHERE SessionId = @sessionId;
                 UPDATE TestingSessions
-                   SET GlobalState = '{}', Status = 'En_Cours', Metadata = '', TestStrategy = ''
+                   SET GlobalState = '{}', Status = 'En_Cours', Metadata = '', TestStrategy = '', CodeSnapshot = ''
                  WHERE Id = @sessionId;",
                 new { sessionId });
         }

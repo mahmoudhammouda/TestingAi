@@ -16,6 +16,9 @@
       <button class="tab" [class.active]="activeTab === 'code'" (click)="selectTab('code')">
         <span class="tab-icon">✏️</span> Coller du code C#
       </button>
+      <button class="tab" [class.active]="activeTab === 'folder'" (click)="selectTab('folder')">
+        <span class="tab-icon">🗂️</span> Importer un dossier
+      </button>
       <button class="tab" [class.active]="activeTab === 'path'" (click)="selectTab('path')">
         <span class="tab-icon">📁</span> Chemin projet
       </button>
@@ -77,6 +80,49 @@
             spellcheck="false"
             placeholder="// Collez votre code C# ici&#10;&#10;public class MyService&#10;{&#10;    // ...&#10;}">
           </textarea>
+        </div>
+      </ng-container>
+
+      <!-- ── Onglet : Importer un dossier ─────────────────────────────────── -->
+      <ng-container *ngIf="activeTab === 'folder'">
+        <div class="drop-zone" [class.has-file]="folderFiles.length > 0" (click)="folderInput.click()">
+          <input #folderInput type="file" webkitdirectory multiple hidden (change)="onFolderChange($event)">
+
+          <ng-container *ngIf="folderFiles.length === 0 && !folderBlocked">
+            <div class="dz-icon">🗂️</div>
+            <div class="dz-title">Sélectionnez un dossier de projet C#</div>
+            <div class="dz-sub">un dossier de fichiers <code>.cs</code>, ou un dossier avec un unique <code>.csproj</code></div>
+          </ng-container>
+
+          <ng-container *ngIf="folderFiles.length > 0">
+            <div class="dz-icon">✅</div>
+            <div class="dz-title file-ok">{{ folderName }}</div>
+            <div class="dz-sub">
+              {{ csFiles.length }} fichier(s) .cs<span *ngIf="folderHasProject"> · projet .csproj détecté</span> — cliquez pour changer
+            </div>
+          </ng-container>
+        </div>
+
+        <div class="folder-blocked" *ngIf="folderBlocked">
+          <span class="error-icon">⚠</span> {{ folderBlocked }}
+        </div>
+
+        <div class="folder-warn" *ngIf="folderWarnMany">
+          ⚠ Beaucoup de fichiers ({{ csFiles.length }}). La génération peut être longue — décochez ceux à ignorer.
+        </div>
+
+        <div class="folder-list" *ngIf="csFiles.length > 0">
+          <div class="folder-list-head">
+            <span>Fichiers à couvrir <strong>({{ selectedCsCount }}/{{ csFiles.length }})</strong></span>
+            <span class="folder-list-actions">
+              <button type="button" class="link-btn" (click)="toggleAllFolderFiles(true)">Tout cocher</button>
+              <button type="button" class="link-btn" (click)="toggleAllFolderFiles(false)">Tout décocher</button>
+            </span>
+          </div>
+          <label class="folder-item" *ngFor="let f of csFiles">
+            <input type="checkbox" [checked]="f.selected" (change)="toggleFolderFile(f)">
+            <span class="folder-item-path mono">{{ f.relativePath }}</span>
+          </label>
         </div>
       </ng-container>
 
